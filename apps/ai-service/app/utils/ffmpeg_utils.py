@@ -1,13 +1,37 @@
 import subprocess
 import os
 import json
+import re
 from pathlib import Path
 from loguru import logger
 from typing import Optional, Dict, Any, Tuple
 
 
+def _parse_frame_rate(rate_str: str) -> float:
+    """Safely parse a fractional frame-rate string like '30000/1001' into a float."""
+    try:
+        if "/" in rate_str:
+            num, den = rate_str.split("/", 1)
+            num, den = int(num), int(den)
+            return num / den if den != 0 else 0.0
+        return float(rate_str)
+    except (ValueError, ZeroDivisionError):
+        return 0.0
+
+
+def _validate_storage_path(path: str, base_dir: Optional[str] = None) -> str:
+    """Resolve a path and ensure it doesn't escape the expected storage base directory."""
+    resolved = os.path.realpath(path)
+    if base_dir:
+        base = os.path.realpath(base_dir)
+        if not resolved.startswith(base + os.sep) and resolved != base:
+            raise ValueError(f"Path '{path}' is outside the allowed storage directory.")
+    return resolved
+
+
 def get_video_info(video_path: str) -> Dict[str, Any]:
     """Extract video metadata using ffprobe."""
+    video_path = os.path.realpath(video_path)
     cmd = [
         "ffprobe",
         "-v", "quiet",
@@ -40,7 +64,7 @@ def get_video_info(video_path: str) -> Dict[str, Any]:
         "bitrate": int(fmt.get("bit_rate", 0)),
         "width": int(video_stream.get("width", 0)) if video_stream else 0,
         "height": int(video_stream.get("height", 0)) if video_stream else 0,
-        "fps": eval(video_stream.get("r_frame_rate", "0/1")) if video_stream else 0.0,
+        "fps": _parse_frame_rate(video_stream.get("r_frame_rate", "0/1")) if video_stream else 0.0,
         "video_codec": video_stream.get("codec_name") if video_stream else None,
         "audio_codec": audio_stream.get("codec_name") if audio_stream else None,
         "has_audio": audio_stream is not None,
@@ -49,6 +73,8 @@ def get_video_info(video_path: str) -> Dict[str, Any]:
 
 def extract_audio(video_path: str, output_path: str) -> str:
     """Extract audio from video as WAV for Whisper transcription."""
+    video_path = os.path.realpath(video_path)
+    output_path = os.path.realpath(output_path)
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     cmd = [
@@ -162,6 +188,9 @@ def generate_thumbnail(video_path: str, output_path: str, timestamp: Optional[fl
 
 def add_subtitles_to_video(video_path: str, subtitle_path: str, output_path: str) -> str:
     """Burn subtitles into a video clip."""
+    video_path = os.path.realpath(video_path)
+    subtitle_path = os.path.realpath(subtitle_path)
+    output_path = os.path.realpath(output_path)
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     cmd = [

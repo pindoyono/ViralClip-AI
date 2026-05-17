@@ -5,6 +5,8 @@ from loguru import logger
 from app.models.schemas import ClipGenerationRequest, ClipGenerationResponse
 from app.services.clip_service import identify_viral_segments
 from app.services.transcript_service import transcribe_video
+from app.utils.ffmpeg_utils import _validate_storage_path
+from app.config import settings
 
 router = APIRouter(prefix="/clips", tags=["clips"])
 
@@ -12,15 +14,20 @@ router = APIRouter(prefix="/clips", tags=["clips"])
 @router.post("", response_model=ClipGenerationResponse)
 async def generate_clips(request: ClipGenerationRequest):
     """Identify viral clip segments from a video using AI."""
-    if not os.path.exists(request.storage_path):
-        raise HTTPException(status_code=404, detail=f"Video file not found: {request.storage_path}")
+    try:
+        safe_path = _validate_storage_path(request.storage_path, settings.local_storage_path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if not os.path.exists(safe_path):
+        raise HTTPException(status_code=404, detail=f"Video file not found: {safe_path}")
 
     start = time.time()
     try:
         segments = request.segments
         if not segments:
             logger.info(f"No pre-computed segments; transcribing {request.video_id}")
-            result = await transcribe_video(request.storage_path)
+            result = await transcribe_video(safe_path)
             segments = result["segments"]
 
         clips = await identify_viral_segments(
