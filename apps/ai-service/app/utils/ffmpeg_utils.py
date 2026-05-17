@@ -193,10 +193,13 @@ def add_subtitles_to_video(video_path: str, subtitle_path: str, output_path: str
     output_path = os.path.realpath(output_path)
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
+    # Escape characters special to ffmpeg filter syntax (colons, backslashes, single quotes)
+    escaped_subtitle = subtitle_path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+
     cmd = [
         "ffmpeg",
         "-i", video_path,
-        "-vf", f"subtitles={subtitle_path}:force_style='Fontsize=24,Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H80000000,BorderStyle=3,Outline=2,Shadow=1,MarginV=30'",
+        "-vf", f"subtitles={escaped_subtitle}:force_style='Fontsize=24,Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H80000000,BorderStyle=3,Outline=2,Shadow=1,MarginV=30'",
         "-c:v", "libx264",
         "-crf", "23",
         "-preset", "fast",

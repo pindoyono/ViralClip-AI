@@ -186,7 +186,7 @@ func (w *PublishingWorker) ProcessScheduledPosts(ctx context.Context) {
 	var posts []ScheduledPost
 	if err := w.db.WithContext(ctx).
 		Table("scheduled_posts").
-		Where("status = 'scheduled' AND scheduled_at <= NOW()").
+		Where("status = ? AND scheduled_at <= NOW()", "pending").
 		Limit(20).
 		Find(&posts).Error; err != nil {
 		log.Error().Err(err).Msg("Failed to query scheduled posts")
@@ -238,10 +238,20 @@ func (w *CleanupWorker) CleanupOldData(ctx context.Context) {
 
 	cutoff := time.Now().AddDate(0, 0, -30)
 
+	// Allowlist prevents SQL injection via table names
+	allowedTables := map[string]bool{
+		"videos":          true,
+		"clips":           true,
+		"scheduled_posts": true,
+	}
 	tables := []string{"videos", "clips", "scheduled_posts"}
 	for _, table := range tables {
+		if !allowedTables[table] {
+			log.Warn().Str("table", table).Msg("Skipping disallowed table in cleanup")
+			continue
+		}
 		result := w.db.WithContext(ctx).
-			Exec(fmt.Sprintf("DELETE FROM %s WHERE deleted_at IS NOT NULL AND deleted_at < ?", table), cutoff)
+			Exec(fmt.Sprintf("DELETE FROM %s WHERE deleted_at IS NOT NULL AND deleted_at < ?", table), cutoff) //nolint:gosec // table name is from an explicit allowlist
 		if result.Error != nil {
 			log.Error().Err(result.Error).Str("table", table).Msg("Cleanup failed")
 		} else if result.RowsAffected > 0 {
