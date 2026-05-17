@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-service
+  namespace: viralclip
+  labels:
+    app: ai-service
+    app.kubernetes.io/part-of: viralclip-ai
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ai-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: ai-service
+    spec:
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: ai-service
+          image: viralclip/ai-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: APP_ENV
+              value: "production"
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: viralclip-secrets
+                  key: openai-api-key
+            - name: WHISPER_MODEL
+              value: "base"
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: viralclip-secrets
+                  key: redis-url
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 2000m
+              memory: 4Gi
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            failureThreshold: 3
+          volumeMounts:
+            - name: storage
+              mountPath: /app/storage
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: viralclip-storage-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-service
+  namespace: viralclip
+spec:
+  selector:
+    app: ai-service
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http
+  type: ClusterIP
