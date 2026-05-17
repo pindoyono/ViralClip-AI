@@ -4,13 +4,15 @@ import (
 	"context"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/redis/go-redis/v9"
+	"github.com/rs/zerolog/log"
 
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/handlers"
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/middleware"
+	apiqueue "github.com/pindoyono/viralclip-ai/apps/api/internal/queue"
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/server"
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/storage"
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/utils"
-	"github.com/rs/zerolog/log"
 )
 
 // Register sets up all application routes.
@@ -30,9 +32,21 @@ func Register(srv *server.Server) {
 		log.Fatal().Err(err).Msg("Failed to initialize storage service")
 	}
 
+	// Build the queue publisher so VideoHandler can enqueue transcript jobs.
+	var queuePublisher apiqueue.VideoPublisher
+	if srv.Config.Redis.URL != "" {
+		opt, parseErr := redis.ParseURL(srv.Config.Redis.URL)
+		if parseErr != nil {
+			log.Warn().Err(parseErr).Msg("Invalid Redis URL; queue publishing disabled")
+		} else {
+			rdb := redis.NewClient(opt)
+			queuePublisher = apiqueue.NewPublisher(rdb, srv.Config.Redis.MaxRetries)
+		}
+	}
+
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(srv.DB, jwtManager)
-	videoHandler := handlers.NewVideoHandler(srv.DB, storageSvc)
+	videoHandler := handlers.NewVideoHandler(srv.DB, storageSvc, queuePublisher)
 	clipHandler := handlers.NewClipHandler(srv.DB)
 	socialHandler := handlers.NewSocialHandler(srv.DB)
 	analyticsHandler := handlers.NewAnalyticsHandler(srv.DB)

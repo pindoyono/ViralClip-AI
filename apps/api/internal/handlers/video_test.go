@@ -314,10 +314,10 @@ func TestProcessVideo_TriggerSuccess(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, fiber.StatusOK, resp.StatusCode)
 
-	// Verify status updated
+	// Verify status reset to pending so the worker pipeline can pick it up
 	var updated models.Video
 	db.First(&updated, "id = ?", video.ID)
-	assert.Equal(t, models.VideoStatusProcessing, updated.Status)
+	assert.Equal(t, models.VideoStatusPending, updated.Status)
 }
 
 func TestProcessVideo_AlreadyProcessing(t *testing.T) {

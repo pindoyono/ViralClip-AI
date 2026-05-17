@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/dto"
+	apiqueue "github.com/pindoyono/viralclip-ai/apps/api/internal/queue"
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/middleware"
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/models"
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/storage"
@@ -21,11 +23,19 @@ import (
 type VideoHandler struct {
 	db             *gorm.DB
 	storageService storage.StorageService
+	publisher      apiqueue.VideoPublisher
 }
 
 // NewVideoHandler creates a new VideoHandler.
-func NewVideoHandler(db *gorm.DB, storageService storage.StorageService) *VideoHandler {
-	return &VideoHandler{db: db, storageService: storageService}
+// publisher may be nil; when nil, jobs will not be enqueued and a warning is
+// logged instead. This allows the handler to work in environments where Redis
+// is unavailable (e.g. unit tests that do not exercise queue publishing).
+func NewVideoHandler(db *gorm.DB, storageService storage.StorageService, publisher ...apiqueue.VideoPublisher) *VideoHandler {
+	var pub apiqueue.VideoPublisher
+	if len(publisher) > 0 {
+		pub = publisher[0]
+	}
+	return &VideoHandler{db: db, storageService: storageService, publisher: pub}
 }
 
 // Upload handles video file upload.
@@ -113,6 +123,9 @@ func (h *VideoHandler) Upload(c *fiber.Ctx) error {
 		log.Error().Err(err).Msg("Failed to create video record")
 		return utils.InternalError(c, "Failed to create video record")
 	}
+
+	// Enqueue transcript job so the worker pipeline can begin immediately.
+	h.enqueueTranscript(c.Context(), video.ID.String(), userID, fileInfo.Key, storageURL)
 
 	log.Info().
 		Str("video_id", video.ID.String()).
@@ -294,9 +307,12 @@ func (h *VideoHandler) ProcessVideo(c *fiber.Ctx) error {
 
 	now := time.Now()
 	h.db.Model(&video).Updates(map[string]interface{}{
-		"status":     models.VideoStatusProcessing,
+		"status":     models.VideoStatusPending,
 		"updated_at": now,
 	})
+
+	// Push to transcript queue so the worker pipeline picks it up.
+	h.enqueueTranscript(c.Context(), video.ID.String(), userID, video.StoragePath, video.StorageURL)
 
 	log.Info().
 		Str("video_id", videoID).
@@ -304,4 +320,20 @@ func (h *VideoHandler) ProcessVideo(c *fiber.Ctx) error {
 		Msg("Video processing triggered")
 
 	return utils.SuccessMessage(c, "Video processing started")
+}
+
+// enqueueTranscript publishes a transcript job to the Redis queue.
+// If the publisher is not configured, a warning is logged and the request
+// succeeds anyway (backward compat with deployments without Redis).
+func (h *VideoHandler) enqueueTranscript(ctx context.Context, videoID, userID, storagePath, storageURL string) {
+	if h.publisher == nil {
+		log.Warn().Str("video_id", videoID).Msg("Queue publisher not configured; skipping transcript job enqueue")
+		return
+	}
+
+	if err := h.publisher.PublishTranscriptJob(ctx, videoID, videoID, userID, storagePath, storageURL); err != nil {
+		// Log but do not fail the HTTP request – the video record is persisted
+		// and can be re-triggered via POST /videos/:id/process.
+		log.Error().Err(err).Str("video_id", videoID).Msg("Failed to enqueue transcript job")
+	}
 }
