@@ -1,1 +1,402 @@
-# ViralClip-AI
+# ViralClip AI
+
+> Transform long-form video content into viral short-form clips using AI — automatically transcribed, segmented, scored, and ready to publish.
+
+[![Go](https://img.shields.io/badge/Go-1.21-blue?logo=go)](https://golang.org)
+[![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python)](https://python.org)
+[![Next.js](https://img.shields.io/badge/Next.js-14-black?logo=next.js)](https://nextjs.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+---
+
+## Features
+
+- 🎬 **AI Clip Detection** — GPT-4 powered viral segment identification with engagement scoring
+- 🎙️ **Speech-to-Text** — Whisper-based transcription with timestamp-accurate segments
+- 🪝 **Hook Generation** — Auto-generate platform-optimized attention hooks in < 15 words
+- 📊 **Viral Scoring** — 0–100 AI score for each clip with rationale
+- 📅 **Multi-Platform Scheduling** — Publish to TikTok, YouTube Shorts & Instagram Reels
+- 📈 **Analytics Dashboard** — Real-time engagement metrics across all connected platforms
+- 🔔 **Trending Topics** — Platform-wide trend monitoring for content alignment
+- 🔐 **JWT Authentication** — Secure token-based auth with refresh token rotation
+- 📦 **Subscription Tiers** — Free / Starter / Pro / Enterprise with Stripe integration
+- 🐳 **Production-Ready** — Docker Compose + Kubernetes manifests included
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                          Internet / CDN                              │
+└────────────────────────────┬────────────────────────────────────────┘
+                             │
+                    ┌────────▼─────────┐
+                    │   Nginx Proxy     │  :80 / :443
+                    │  (TLS, Rate Limit)│
+                    └────┬─────────┬───┘
+                         │         │
+             ┌───────────▼──┐  ┌───▼──────────────┐
+             │  Next.js 14  │  │  Go Fiber API     │
+             │  Web App     │  │  :8080            │
+             │  :3000       │  │                   │
+             └──────────────┘  └──────┬────────────┘
+                                      │
+              ┌───────────────────────┼─────────────────────┐
+              │                       │                       │
+    ┌─────────▼────────┐  ┌───────────▼──────┐  ┌──────────▼───────┐
+    │  PostgreSQL 16   │  │  Redis 7          │  │  Python FastAPI  │
+    │  (Primary Store) │  │  (Cache / Queue)  │  │  AI Service      │
+    └──────────────────┘  └───────────────────┘  │  :8000           │
+                                    │             └──────────────────┘
+                          ┌─────────▼────────┐         │
+                          │  Go Worker       │─────────►│
+                          │  (Background     │  Whisper + GPT-4
+                          │   Processing)    │
+                          └──────────────────┘
+```
+
+### Data Flow
+
+```
+User uploads video
+      │
+      ▼
+API stores video record (status: pending)
+      │
+      ▼
+Worker polls pending videos → calls AI Service
+      │
+      ▼
+AI Service:
+  1. Extracts audio (FFmpeg)
+  2. Transcribes speech (Whisper)
+  3. Identifies viral segments (GPT-4)
+  4. Generates hooks & metadata
+      │
+      ▼
+Clips created in DB (status: ready)
+      │
+      ▼
+User schedules clips → Worker publishes to platforms
+      │
+      ▼
+Analytics synced back to dashboard
+```
+
+---
+
+## Tech Stack
+
+| Layer          | Technology               | Purpose                            |
+|----------------|-------------------------|------------------------------------|
+| Frontend       | Next.js 14 (App Router) | React UI with SSR                  |
+| State          | Zustand + React Query    | Client state + server data cache   |
+| API            | Go 1.21 + Fiber v2       | High-performance REST API          |
+| AI Service     | Python 3.11 + FastAPI    | ML inference & AI integrations     |
+| Worker         | Go 1.21                  | Background job processing          |
+| Database       | PostgreSQL 16            | Primary data store                 |
+| Cache / Queue  | Redis 7                  | Caching & job queuing              |
+| Transcription  | OpenAI Whisper           | Speech-to-text                     |
+| AI             | OpenAI GPT-4             | Content analysis & generation      |
+| Auth           | JWT (HS256)              | Stateless authentication           |
+| Payments       | Stripe                   | Subscription management            |
+| Reverse Proxy  | Nginx                    | TLS termination, rate limiting     |
+| Container      | Docker + Docker Compose  | Development & deployment           |
+| Orchestration  | Kubernetes (Helm)        | Production scaling                 |
+
+---
+
+## Prerequisites
+
+| Tool            | Version  | Install                                          |
+|-----------------|----------|--------------------------------------------------|
+| Docker          | ≥ 24.0   | https://docs.docker.com/get-docker/              |
+| Docker Compose  | ≥ 2.20   | Included with Docker Desktop                     |
+| Go              | ≥ 1.21   | https://go.dev/dl/ (for local dev)               |
+| Python          | ≥ 3.11   | https://python.org (for local dev)               |
+| Node.js         | ≥ 20     | https://nodejs.org (for local dev)               |
+| pnpm            | ≥ 8      | `npm i -g pnpm` (for local dev)                  |
+| FFmpeg          | ≥ 6      | https://ffmpeg.org/download.html                 |
+
+---
+
+## Quick Start
+
+Get the full stack running in 5 steps:
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/pindoyono/ViralClip-AI.git
+cd ViralClip-AI
+
+# 2. Copy and configure environment variables
+cp .env.example .env
+# Edit .env and set at minimum: OPENAI_API_KEY, JWT_SECRET
+
+# 3. Start all services with Docker Compose
+docker compose up -d
+
+# 4. Wait for services to be healthy (≈ 60s)
+docker compose ps
+
+# 5. Open the application
+open http://localhost:3000
+```
+
+The following ports will be available:
+
+| Service      | URL                          |
+|-------------|------------------------------|
+| Web App     | http://localhost:3000         |
+| API         | http://localhost:8080         |
+| AI Service  | http://localhost:8000         |
+| PostgreSQL  | localhost:5432                |
+| Redis       | localhost:6379                |
+
+---
+
+## Development Setup
+
+### Environment Variables
+
+Copy `.env.example` to `.env` and fill in the required values:
+
+```bash
+cp .env.example .env
+```
+
+#### Required Variables
+
+| Variable           | Description                          | Example                        |
+|-------------------|--------------------------------------|--------------------------------|
+| `OPENAI_API_KEY`  | OpenAI API key for GPT-4 & Whisper  | `sk-...`                      |
+| `JWT_SECRET`      | HS256 signing secret (≥ 32 chars)   | `your-super-secret-key`        |
+| `DATABASE_PASSWORD` | PostgreSQL password               | `strongpassword123`            |
+
+#### Optional Variables
+
+| Variable                   | Default                        | Description                      |
+|---------------------------|--------------------------------|----------------------------------|
+| `APP_ENV`                 | `development`                  | Application environment          |
+| `API_PORT`                | `8080`                         | Go API server port               |
+| `AI_SERVICE_PORT`         | `8000`                         | Python AI service port           |
+| `DATABASE_NAME`           | `viralclip`                    | PostgreSQL database name         |
+| `DATABASE_USER`           | `viralclip`                    | PostgreSQL user                  |
+| `DATABASE_PORT`           | `5432`                         | PostgreSQL port                  |
+| `REDIS_URL`               | `redis://localhost:6379/0`     | Redis connection URL             |
+| `REDIS_PASSWORD`          | *(empty)*                      | Redis password                   |
+| `JWT_EXPIRES_IN`          | `24h`                          | Access token lifetime            |
+| `JWT_REFRESH_EXPIRES_IN`  | `168h`                         | Refresh token lifetime           |
+| `WHISPER_MODEL`           | `base`                         | Whisper model size               |
+| `WHISPER_DEVICE`          | `cpu`                          | `cpu` or `cuda`                  |
+| `OPENAI_MODEL`            | `gpt-4-turbo-preview`          | OpenAI chat model                |
+| `STORAGE_PROVIDER`        | `local`                        | `local` or `s3`                  |
+| `LOCAL_STORAGE_PATH`      | `./storage`                    | Local file storage path          |
+| `CORS_ORIGINS`            | `http://localhost:3000`        | Allowed CORS origins             |
+| `LOG_LEVEL`               | `info`                         | `debug`, `info`, `warn`, `error` |
+| `WORKER_CONCURRENCY`      | `4`                            | Worker goroutine count           |
+| `NEXT_PUBLIC_API_URL`     | `http://localhost:8080`        | API URL exposed to browser       |
+| `STRIPE_SECRET_KEY`       | *(optional)*                   | Stripe secret key                |
+| `GOOGLE_CLIENT_ID`        | *(optional)*                   | Google OAuth client ID           |
+| `SENTRY_DSN`              | *(optional)*                   | Sentry error tracking DSN        |
+
+### Running Individual Services
+
+#### Go API
+
+```bash
+cd apps/api
+go mod download
+cp .env.example .env  # configure database/redis/jwt
+go run main.go
+```
+
+#### Go Worker
+
+```bash
+cd apps/worker
+go mod download
+go run main.go
+```
+
+#### Python AI Service
+
+```bash
+cd apps/ai-service
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env             # configure openai key
+uvicorn main:app --reload --port 8000
+```
+
+#### Next.js Web App
+
+```bash
+cd apps/web
+pnpm install
+cp .env.example .env.local       # configure API URL
+pnpm dev
+```
+
+---
+
+## Running Tests
+
+### Go Tests (API & Worker)
+
+```bash
+# API tests
+cd apps/api
+go test ./...
+
+# Worker tests
+cd apps/worker
+go test ./...
+
+# With coverage
+go test -coverprofile=coverage.out ./... && go tool cover -html=coverage.out
+```
+
+### Python Tests (AI Service)
+
+```bash
+cd apps/ai-service
+pip install pytest pytest-asyncio
+pytest tests/ -v
+```
+
+### TypeScript Tests (Web App)
+
+```bash
+cd apps/web
+pnpm add -D jest @swc/jest @testing-library/react @testing-library/jest-dom identity-obj-proxy
+pnpm jest
+```
+
+---
+
+## API Endpoints
+
+### Authentication
+
+| Method | Endpoint                     | Auth | Description              |
+|--------|------------------------------|------|--------------------------|
+| POST   | `/api/v1/auth/register`      | No   | Register new user        |
+| POST   | `/api/v1/auth/login`         | No   | Login and get tokens     |
+| POST   | `/api/v1/auth/logout`        | Yes  | Invalidate refresh token |
+| POST   | `/api/v1/auth/refresh`       | No   | Refresh access token     |
+| GET    | `/api/v1/auth/me`            | Yes  | Get current user         |
+| POST   | `/api/v1/auth/forgot-password` | No | Request password reset   |
+| POST   | `/api/v1/auth/reset-password`  | No | Reset password           |
+
+### Videos
+
+| Method | Endpoint                     | Auth | Description              |
+|--------|------------------------------|------|--------------------------|
+| POST   | `/api/v1/videos/`            | Yes  | Upload video (multipart) |
+| GET    | `/api/v1/videos/`            | Yes  | List user videos         |
+| GET    | `/api/v1/videos/:id`         | Yes  | Get video by ID          |
+| DELETE | `/api/v1/videos/:id`         | Yes  | Delete video             |
+| POST   | `/api/v1/videos/:id/process` | Yes  | Trigger AI processing    |
+| GET    | `/api/v1/videos/:id/clips`   | Yes  | List clips for video     |
+
+### Clips
+
+| Method | Endpoint                     | Auth | Description              |
+|--------|------------------------------|------|--------------------------|
+| GET    | `/api/v1/clips/`             | Yes  | List all user clips      |
+| GET    | `/api/v1/clips/:id`          | Yes  | Get clip by ID           |
+| PATCH  | `/api/v1/clips/:id`          | Yes  | Update clip metadata     |
+| DELETE | `/api/v1/clips/:id`          | Yes  | Delete clip              |
+
+### Social & Scheduling
+
+| Method | Endpoint                          | Auth | Description              |
+|--------|-----------------------------------|------|--------------------------|
+| GET    | `/api/v1/social/accounts`         | Yes  | List connected accounts  |
+| DELETE | `/api/v1/social/accounts/:id`     | Yes  | Disconnect account       |
+| POST   | `/api/v1/social/schedule`         | Yes  | Schedule clip for post   |
+| GET    | `/api/v1/social/schedule`         | Yes  | List scheduled posts     |
+| DELETE | `/api/v1/social/schedule/:id`     | Yes  | Cancel scheduled post    |
+
+### Analytics & Trending
+
+| Method | Endpoint                     | Auth | Description              |
+|--------|------------------------------|------|--------------------------|
+| GET    | `/api/v1/analytics/summary`  | Yes  | Get analytics summary    |
+| GET    | `/api/v1/trending/`          | Yes  | Get trending topics      |
+
+### AI Service
+
+| Method | Endpoint              | Description                        |
+|--------|-----------------------|------------------------------------|
+| POST   | `/api/v1/transcript`  | Transcribe video with Whisper      |
+| POST   | `/api/v1/clips`       | Identify viral clip segments       |
+| POST   | `/api/v1/hooks`       | Generate viral hooks               |
+| POST   | `/api/v1/metadata`    | Generate platform metadata         |
+| GET    | `/health`             | Health check                       |
+
+---
+
+## Database Schema
+
+| Table              | Description                                 |
+|--------------------|---------------------------------------------|
+| `users`            | User accounts, auth, subscription tier      |
+| `content_profiles` | AI content strategy per user/platform       |
+| `videos`           | Uploaded source videos with processing state|
+| `clips`            | AI-generated viral clip segments            |
+| `social_accounts`  | Connected TikTok/YouTube/Instagram accounts |
+| `scheduled_posts`  | Clips queued for social media publishing    |
+| `clip_analytics`   | Per-clip engagement metrics by platform     |
+| `trending_topics`  | Platform-wide trending content              |
+
+---
+
+## Deployment
+
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for complete deployment instructions.
+
+### Quick Production Deployment (Docker Compose)
+
+```bash
+# Set production environment variables
+export JWT_SECRET="$(openssl rand -hex 32)"
+export DATABASE_PASSWORD="$(openssl rand -hex 24)"
+export OPENAI_API_KEY="sk-..."
+
+docker compose -f docker-compose.yml up -d
+```
+
+### Kubernetes
+
+```bash
+# Apply manifests
+kubectl apply -f infrastructure/kubernetes/
+```
+
+---
+
+## Contributing
+
+1. Fork the repository
+2. Create your feature branch: `git checkout -b feat/amazing-feature`
+3. Commit your changes: `git commit -m 'feat: add amazing feature'`
+4. Push to the branch: `git push origin feat/amazing-feature`
+5. Open a Pull Request
+
+Please follow [Conventional Commits](https://www.conventionalcommits.org/) for commit messages.
+
+### Code Style
+
+- **Go**: `gofmt` + `golangci-lint`
+- **Python**: `black` + `ruff`
+- **TypeScript**: `eslint` + `prettier`
+
+---
+
+## License
+
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
