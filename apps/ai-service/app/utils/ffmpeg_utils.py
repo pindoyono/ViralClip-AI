@@ -104,6 +104,8 @@ def extract_clip(
     add_fade: bool = True,
 ) -> str:
     """Extract a clip segment from a video."""
+    video_path = os.path.realpath(video_path)
+    output_path = os.path.realpath(output_path)
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     duration = end_time - start_time
@@ -160,6 +162,8 @@ def extract_clip(
 
 def generate_thumbnail(video_path: str, output_path: str, timestamp: Optional[float] = None) -> str:
     """Generate a thumbnail from a video at the specified timestamp."""
+    video_path = os.path.realpath(video_path)
+    output_path = os.path.realpath(output_path)
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     if timestamp is None:

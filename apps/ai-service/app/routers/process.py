@@ -289,7 +289,7 @@ async def process_subtitles(request: ProcessSubtitlesRequest):
         try:
             clip_path = _validate_storage_path(clip_path, settings.local_storage_path)
         except ValueError:
-            logger.warning(f"Clip path outside storage directory, skipping: {clip_path}")
+            logger.warning("Clip path outside storage directory, skipping (path withheld for security)")
             continue
         if not os.path.exists(clip_path):
             logger.warning(f"Clip file not found, skipping: {clip_path}")
