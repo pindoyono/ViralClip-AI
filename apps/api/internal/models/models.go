@@ -9,7 +9,7 @@ import (
 
 // Base provides common fields for all models.
 type Base struct {
-	ID        uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	ID        uuid.UUID      `gorm:"type:varchar(36);primaryKey" json:"id"`
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
@@ -39,8 +39,8 @@ type User struct {
 	PasswordHash    string           `gorm:"not null" json:"-"`
 	Name            string           `gorm:"not null" json:"name"`
 	AvatarURL       string           `json:"avatar_url"`
-	IsEmailVerified bool             `gorm:"default:false" json:"is_email_verified"`
-	IsActive        bool             `gorm:"default:true" json:"is_active"`
+	IsEmailVerified bool             `gorm:"not null" json:"is_email_verified"`
+	IsActive        bool             `gorm:"not null" json:"is_active"`
 	Tier            SubscriptionTier `gorm:"default:'free'" json:"tier"`
 	StripeCustomerID string          `gorm:"uniqueIndex" json:"stripe_customer_id,omitempty"`
 	StripeSubscriptionID string      `json:"stripe_subscription_id,omitempty"`

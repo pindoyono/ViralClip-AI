@@ -52,7 +52,7 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 	}
 
 	user := models.User{
-		ID:           uuid.New(),
+		Base:         models.Base{ID: uuid.New()},
 		Name:         req.Name,
 		Email:        req.Email,
 		PasswordHash: hash,
@@ -110,8 +110,12 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	}
 
 	var user models.User
-	if err := h.db.Where("email = ? AND is_active = true", req.Email).First(&user).Error; err != nil {
+	if err := h.db.Where("email = ?", req.Email).First(&user).Error; err != nil {
 		return utils.Unauthorized(c, "Invalid email or password")
+	}
+
+	if !user.IsActive {
+		return utils.Unauthorized(c, "Account is disabled")
 	}
 
 	if !utils.CheckPasswordHash(req.Password, user.PasswordHash) {

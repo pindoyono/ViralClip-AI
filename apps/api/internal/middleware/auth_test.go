@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"net/http"
 	"testing"
 	"time"
 
@@ -46,7 +47,7 @@ func TestGetUserID_WithValidToken(t *testing.T) {
 	})
 
 	// agent
-	req, _ := fiber.NewRequest("GET", "/test", nil)
+	req, _ := http.NewRequest("GET", "/test", nil)
 	resp, err := app.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, 200, resp.StatusCode)
@@ -59,7 +60,7 @@ func TestGetUserID_NoToken(t *testing.T) {
 		return c.SendString(GetUserID(c))
 	})
 
-	req, _ := fiber.NewRequest("GET", "/test", nil)
+	req, _ := http.NewRequest("GET", "/test", nil)
 	resp, err := app.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, 200, resp.StatusCode)
@@ -72,7 +73,7 @@ func TestGetUserTier_Default(t *testing.T) {
 		return c.SendString(GetUserTier(c))
 	})
 
-	req, _ := fiber.NewRequest("GET", "/test", nil)
+	req, _ := http.NewRequest("GET", "/test", nil)
 	resp, err := app.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, 200, resp.StatusCode)
@@ -94,7 +95,7 @@ func TestRequireTier_InsufficientTier(t *testing.T) {
 		return c.SendString("ok")
 	})
 
-	req, _ := fiber.NewRequest("GET", "/pro-only", nil)
+	req, _ := http.NewRequest("GET", "/pro-only", nil)
 	resp, err := app.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, fiber.StatusForbidden, resp.StatusCode)
@@ -116,7 +117,7 @@ func TestRequireTier_SufficientTier(t *testing.T) {
 		return c.SendString("ok")
 	})
 
-	req, _ := fiber.NewRequest("GET", "/pro-only", nil)
+	req, _ := http.NewRequest("GET", "/pro-only", nil)
 	resp, err := app.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, fiber.StatusOK, resp.StatusCode)
@@ -138,7 +139,7 @@ func TestRequireTier_EnterpriseAbovePro(t *testing.T) {
 		return c.SendString("ok")
 	})
 
-	req, _ := fiber.NewRequest("GET", "/pro-only", nil)
+	req, _ := http.NewRequest("GET", "/pro-only", nil)
 	resp, err := app.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, fiber.StatusOK, resp.StatusCode)
@@ -152,7 +153,7 @@ func TestProtected_FiltersPaths(t *testing.T) {
 		return c.SendString("registered")
 	})
 
-	req, _ := fiber.NewRequest("POST", "/api/v1/auth/register", nil)
+	req, _ := http.NewRequest("POST", "/api/v1/auth/register", nil)
 	resp, err := app.Test(req)
 	require.NoError(t, err)
 	// should NOT be blocked by JWT middleware
@@ -167,7 +168,7 @@ func TestProtected_BlocksUnauthorized(t *testing.T) {
 		return c.SendString("videos")
 	})
 
-	req, _ := fiber.NewRequest("GET", "/api/v1/videos", nil)
+	req, _ := http.NewRequest("GET", "/api/v1/videos", nil)
 	resp, err := app.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, fiber.StatusUnauthorized, resp.StatusCode)

@@ -133,9 +133,8 @@ func (w *VideoProcessingWorker) processVideo(ctx context.Context, video Video) {
 	// Mark as completed
 	now := time.Now()
 	w.db.Model(&Video{}).Where("id = ?", video.ID).Updates(map[string]interface{}{
-		"status":       VideoStatusCompleted,
-		"processed_at": now,
-		"updated_at":   now,
+		"status":     VideoStatusCompleted,
+		"updated_at": now,
 	})
 
 	log.Info().Str("video_id", video.ID).Msg("Video processing completed")
