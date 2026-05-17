@@ -2,6 +2,7 @@ package queue_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -159,7 +160,7 @@ func TestQueueLength(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i < 5; i++ {
-		job := &queue.Job{ID: "j" + string(rune('0'+i)), VideoID: "v", UserID: "u", MaxRetries: 1}
+		job := &queue.Job{ID: fmt.Sprintf("j%d", i), VideoID: "v", UserID: "u", MaxRetries: 1}
 		require.NoError(t, q.Push(ctx, queue.QueueUpload, job))
 	}
 
