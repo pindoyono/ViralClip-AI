@@ -1,0 +1,63 @@
+version: "3.9"
+
+# Development overrides for docker-compose.yml
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  postgres:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      target: development
+    environment:
+      - APP_ENV=development
+      - LOG_LEVEL=debug
+    volumes:
+      - ./apps/api:/app
+      - storage-data:/app/storage
+    command: ["air", "-c", ".air.toml"]
+
+  worker:
+    build:
+      target: development
+    environment:
+      - APP_ENV=development
+      - LOG_LEVEL=debug
+    volumes:
+      - ./apps/worker:/app
+      - storage-data:/app/storage
+    command: ["air", "-c", ".air.toml"]
+
+  ai-service:
+    environment:
+      - APP_ENV=development
+      - LOG_LEVEL=debug
+      - RELOAD=true
+    volumes:
+      - ./apps/ai-service:/app
+      - storage-data:/app/storage
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  web:
+    build:
+      target: development
+    environment:
+      - NODE_ENV=development
+      - NEXT_TELEMETRY_DISABLED=1
+    volumes:
+      - ./apps/web:/app
+      - /app/node_modules
+      - /app/.next
+    command: ["pnpm", "dev"]
+    ports:
+      - "3000:3000"
+
+  nginx:
+    volumes:
+      - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
