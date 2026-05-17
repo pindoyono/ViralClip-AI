@@ -146,3 +146,82 @@ class VideoProcessResponse(BaseModel):
     video_id: str
     status: ProcessingStatus
     message: str
+
+
+# ---------------------------------------------------------------------------
+# Pipeline /process/* schemas (used by worker queue consumers)
+# ---------------------------------------------------------------------------
+
+class ProcessTranscriptRequest(BaseModel):
+    video_id: str
+    storage_path: str
+    language: Optional[str] = None
+
+
+class ProcessTranscriptResponse(BaseModel):
+    video_id: str
+    language: str
+    duration: float
+    segments: List[TranscriptSegment]
+    full_text: str
+    transcript_path: str  # path to cached JSON file
+
+
+class ExtractedClip(BaseModel):
+    """A single clip extracted from the source video."""
+    index: int
+    storage_path: str
+    start_time: float
+    end_time: float
+    duration: float
+    viral_score: float
+    rationale: str
+    hook_text: str
+    suggested_title: str
+    hashtags: List[str]
+    suggested_for: List[str]
+
+
+class ProcessClipsRequest(BaseModel):
+    video_id: str
+    storage_path: str
+    content_profile: Optional[Dict[str, Any]] = None
+    max_clips: int = Field(default=10, ge=1, le=30)
+    min_duration: float = Field(default=15.0, ge=5.0)
+    max_duration: float = Field(default=90.0, le=300.0)
+
+
+class ProcessClipsResponse(BaseModel):
+    video_id: str
+    clips: List[ExtractedClip]
+    manifest_path: str
+    processing_time: float
+
+
+class ProcessSubtitlesRequest(BaseModel):
+    video_id: str
+    storage_path: str
+    style: SubtitleStyle = SubtitleStyle.DEFAULT
+    font_size: int = Field(default=24, ge=12, le=72)
+    primary_color: str = Field(default="&H00FFFFFF")
+    outline_color: str = Field(default="&H00000000")
+
+
+class ProcessSubtitlesResponse(BaseModel):
+    video_id: str
+    clips_processed: int
+
+
+class ProcessVideoRequest(BaseModel):
+    video_id: str
+    storage_path: str
+
+
+class ProcessVideoResponse(BaseModel):
+    video_id: str
+    duration: float
+    width: int
+    height: int
+    fps: float
+    has_audio: bool
+    thumbnail_path: str

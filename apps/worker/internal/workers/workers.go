@@ -3,6 +3,7 @@ package workers
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -42,18 +43,33 @@ type Clip struct {
 	VideoID      string    `json:"video_id"`
 	UserID       string    `json:"user_id"`
 	Title        string    `json:"title"`
+	HookText     string    `json:"hook_text"`
+	AIRationale  string    `json:"ai_rationale"`
 	StartTime    float64   `json:"start_time"`
 	EndTime      float64   `json:"end_time"`
 	Duration     float64   `json:"duration"`
 	StoragePath  string    `json:"storage_path"`
 	StorageURL   string    `json:"storage_url"`
 	ViralScore   float64   `json:"viral_score"`
+	Hashtags     string    `json:"hashtags"`      // JSON array string
+	SuggestedFor string    `json:"suggested_for"` // JSON array string
 	Status       string    `json:"status"`
 	ErrorMessage string    `json:"error_message"`
+	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 func (Clip) TableName() string { return "clips" }
+
+// newUUID generates a random UUID v4 string without external dependencies.
+func newUUID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	b[6] = (b[6] & 0x0f) | 0x40 // version 4
+	b[8] = (b[8] & 0x3f) | 0x80 // variant bits
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
 
 // VideoProcessingWorker processes video files and generates clips.
 type VideoProcessingWorker struct {

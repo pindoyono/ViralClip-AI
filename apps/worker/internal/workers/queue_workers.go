@@ -237,7 +237,31 @@ func (w *ClipWorker) processJob(ctx context.Context, job *queue.Job) {
 		w.handleJobFailure(ctx, queue.QueueClip, job, err)
 		return
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
+
+	// Parse the clip list and persist records to the database.
+	var clipsResp struct {
+		VideoID string `json:"video_id"`
+		Clips   []struct {
+			Index          int      `json:"index"`
+			StoragePath    string   `json:"storage_path"`
+			StartTime      float64  `json:"start_time"`
+			EndTime        float64  `json:"end_time"`
+			Duration       float64  `json:"duration"`
+			ViralScore     float64  `json:"viral_score"`
+			Rationale      string   `json:"rationale"`
+			HookText       string   `json:"hook_text"`
+			SuggestedTitle string   `json:"suggested_title"`
+			Hashtags       []string `json:"hashtags"`
+			SuggestedFor   []string `json:"suggested_for"`
+		} `json:"clips"`
+	}
+
+	if decErr := json.NewDecoder(resp.Body).Decode(&clipsResp); decErr != nil {
+		log.Warn().Err(decErr).Str("video_id", job.VideoID).Msg("ClipWorker: failed to decode clips response; skipping DB write")
+	} else if len(clipsResp.Clips) > 0 {
+		w.saveClipsToDB(ctx, job, clipsResp.Clips)
+	}
 
 	_ = w.queueCli.TrackStatus(ctx, job.ID, string(queue.JobStatusDone), queue.DefaultJobTTL)
 
@@ -247,6 +271,63 @@ func (w *ClipWorker) processJob(ctx context.Context, job *queue.Job) {
 	}
 
 	log.Info().Str("job_id", job.ID).Msg("ClipWorker: job done, pushed to subtitle_queue")
+}
+
+// saveClipsToDB creates Clip records in the database for each extracted clip.
+func (w *ClipWorker) saveClipsToDB(ctx context.Context, job *queue.Job, clips []struct {
+	Index          int      `json:"index"`
+	StoragePath    string   `json:"storage_path"`
+	StartTime      float64  `json:"start_time"`
+	EndTime        float64  `json:"end_time"`
+	Duration       float64  `json:"duration"`
+	ViralScore     float64  `json:"viral_score"`
+	Rationale      string   `json:"rationale"`
+	HookText       string   `json:"hook_text"`
+	SuggestedTitle string   `json:"suggested_title"`
+	Hashtags       []string `json:"hashtags"`
+	SuggestedFor   []string `json:"suggested_for"`
+}) {
+	now := time.Now().UTC()
+	for _, c := range clips {
+		hashtagsJSON, _ := json.Marshal(c.Hashtags)
+		suggestedForJSON, _ := json.Marshal(c.SuggestedFor)
+
+		clip := Clip{
+			ID:           newUUID(),
+			VideoID:      job.VideoID,
+			UserID:       job.UserID,
+			Title:        c.SuggestedTitle,
+			HookText:     c.HookText,
+			AIRationale:  c.Rationale,
+			StartTime:    c.StartTime,
+			EndTime:      c.EndTime,
+			Duration:     c.Duration,
+			StoragePath:  c.StoragePath,
+			ViralScore:   c.ViralScore,
+			Hashtags:     string(hashtagsJSON),
+			SuggestedFor: string(suggestedForJSON),
+			Status:       "generating",
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		}
+
+		if err := w.db.WithContext(ctx).Create(&clip).Error; err != nil {
+			log.Error().Err(err).
+				Str("video_id", job.VideoID).
+				Int("clip_index", c.Index).
+				Msg("ClipWorker: failed to create clip record")
+		} else {
+			log.Debug().
+				Str("clip_id", clip.ID).
+				Str("video_id", job.VideoID).
+				Int("clip_index", c.Index).
+				Msg("ClipWorker: clip record created")
+		}
+	}
+	log.Info().
+		Str("video_id", job.VideoID).
+		Int("count", len(clips)).
+		Msg("ClipWorker: clip records saved to DB")
 }
 
 // ---------------------------------------------------------------------------

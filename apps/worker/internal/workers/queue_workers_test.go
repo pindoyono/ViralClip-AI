@@ -193,9 +193,32 @@ func TestClipWorker_ProcessJob_Success_PushesToSubtitleQueue(t *testing.T) {
 	qCli, _ := newTestQueueClient(t)
 	seedVideoForQueue(db, "vid-clip-1", VideoStatusProcessing)
 
+	clipsPayload := map[string]interface{}{
+		"video_id": "vid-clip-1",
+		"clips": []map[string]interface{}{
+			{
+				"index":           0,
+				"storage_path":    "/clips/vid-clip-1/clip_000.mp4",
+				"start_time":      5.0,
+				"end_time":        35.0,
+				"duration":        30.0,
+				"viral_score":     0.88,
+				"rationale":       "Great hook",
+				"hook_text":       "You won't believe this",
+				"suggested_title": "Amazing Clip",
+				"hashtags":        []string{"#viral"},
+				"suggested_for":   []string{"tiktok"},
+			},
+		},
+		"manifest_path":   "/clips/vid-clip-1_manifest.json",
+		"processing_time": 2.5,
+	}
+
 	mockAI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/process/clips", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(clipsPayload)
 	}))
 	defer mockAI.Close()
 
@@ -209,10 +232,20 @@ func TestClipWorker_ProcessJob_Success_PushesToSubtitleQueue(t *testing.T) {
 	ctx := context.Background()
 	w.processJob(ctx, job)
 
+	// Job advanced to subtitle_queue.
 	next, err := qCli.BlockingPop(ctx, queue.QueueSubtitle, 100*time.Millisecond)
 	require.NoError(t, err)
 	require.NotNil(t, next)
 	assert.Equal(t, queue.JobTypeSubtitle, next.Type)
+
+	// Clip record must be created in DB.
+	var clips []Clip
+	db.Where("video_id = ?", "vid-clip-1").Find(&clips)
+	require.Len(t, clips, 1)
+	assert.Equal(t, "Amazing Clip", clips[0].Title)
+	assert.Equal(t, "user-1", clips[0].UserID)
+	assert.InDelta(t, 0.88, clips[0].ViralScore, 0.001)
+	assert.Equal(t, "generating", clips[0].Status)
 }
 
 // ---------------------------------------------------------------------------
@@ -383,8 +416,35 @@ func TestFullPipeline_TranscriptToUpload(t *testing.T) {
 	qCli, _ := newTestQueueClient(t)
 	seedVideoForQueue(db, "vid-e2e", VideoStatusPending)
 
-	// Mock AI service responds OK for any endpoint.
+	// Mock AI service: /process/clips returns a single clip; all other endpoints return OK.
+	clipsPayload := map[string]interface{}{
+		"video_id": "vid-e2e",
+		"clips": []map[string]interface{}{
+			{
+				"index":           0,
+				"storage_path":    "/clips/vid-e2e/clip_000.mp4",
+				"start_time":      0.0,
+				"end_time":        30.0,
+				"duration":        30.0,
+				"viral_score":     0.75,
+				"rationale":       "E2E clip",
+				"hook_text":       "Watch this",
+				"suggested_title": "E2E Test Clip",
+				"hashtags":        []string{},
+				"suggested_for":   []string{"tiktok"},
+			},
+		},
+		"manifest_path":   "/clips/vid-e2e_manifest.json",
+		"processing_time": 1.0,
+	}
+
 	mockAI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/process/clips" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(clipsPayload)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer mockAI.Close()
@@ -408,6 +468,11 @@ func TestFullPipeline_TranscriptToUpload(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, clipJob)
 	cw.processJob(ctx, clipJob)
+
+	// After ClipWorker: one Clip record in DB.
+	var clips []Clip
+	db.Where("video_id = ?", "vid-e2e").Find(&clips)
+	assert.Len(t, clips, 1, "clip record should be created after ClipWorker")
 
 	subJob, err := qCli.BlockingPop(ctx, queue.QueueSubtitle, 100*time.Millisecond)
 	require.NoError(t, err)
