@@ -65,8 +65,9 @@ func (Clip) TableName() string { return "clips" }
 func newUUID() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		// crypto/rand failures are catastrophic; panic to avoid silent data corruption.
-		panic(fmt.Sprintf("crypto/rand unavailable: %v", err))
+		// rand.Read failures are catastrophic (e.g. insufficient entropy); panic to
+		// avoid silently creating duplicate IDs.
+		panic(fmt.Sprintf("failed to generate UUID: %v", err))
 	}
 	b[6] = (b[6] & 0x0f) | 0x40 // version 4
 	b[8] = (b[8] & 0x3f) | 0x80 // variant bits
