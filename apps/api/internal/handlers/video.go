@@ -13,19 +13,19 @@ import (
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/dto"
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/middleware"
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/models"
+	"github.com/pindoyono/viralclip-ai/apps/api/internal/storage"
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/utils"
 )
 
 // VideoHandler handles video-related requests.
 type VideoHandler struct {
-	db          *gorm.DB
-	storagePath string
-	storageURL  string
+	db             *gorm.DB
+	storageService storage.StorageService
 }
 
 // NewVideoHandler creates a new VideoHandler.
-func NewVideoHandler(db *gorm.DB, storagePath, storageURL string) *VideoHandler {
-	return &VideoHandler{db: db, storagePath: storagePath, storageURL: storageURL}
+func NewVideoHandler(db *gorm.DB, storageService storage.StorageService) *VideoHandler {
+	return &VideoHandler{db: db, storageService: storageService}
 }
 
 // Upload handles video file upload.
@@ -59,14 +59,36 @@ func (h *VideoHandler) Upload(c *fiber.Ctx) error {
 	}
 
 	videoID := uuid.New()
-	storagePath := filepath.Join(h.storagePath, "videos", userID, videoID.String()+ext)
+	// key is the logical path used by local storage; for Google Drive the
+	// returned FileInfo.Key will be the Drive file ID.
+	key := fmt.Sprintf("videos/%s/%s%s", userID, videoID.String(), ext)
 
-	if err := c.SaveFile(file, storagePath); err != nil {
+	src, err := file.Open()
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to open uploaded video file")
+		return utils.InternalError(c, "Failed to read uploaded file")
+	}
+	defer src.Close()
+
+	opts := storage.UploadOptions{
+		ContentType: file.Header.Get("Content-Type"),
+		UserID:      userID,
+		Folder:      "uploads",
+		Filename:    file.Filename,
+	}
+
+	fileInfo, err := h.storageService.Upload(c.Context(), key, src, opts)
+	if err != nil {
 		log.Error().Err(err).Msg("Failed to save video file")
 		return utils.InternalError(c, "Failed to save video file")
 	}
 
-	storageURL := fmt.Sprintf("%s/videos/%s/%s%s", h.storageURL, userID, videoID.String(), ext)
+	// Derive a clean storage URL, handling cases where the backend provides
+	// one directly (e.g. Google Drive) or we need to construct it.
+	storageURL := fileInfo.URL
+	if storageURL == "" {
+		storageURL, _ = h.storageService.GetURL(c.Context(), fileInfo.Key)
+	}
 
 	video := models.Video{
 		Base:             models.Base{ID: videoID},
@@ -74,7 +96,7 @@ func (h *VideoHandler) Upload(c *fiber.Ctx) error {
 		Title:            title,
 		Description:      c.FormValue("description"),
 		OriginalFilename: file.Filename,
-		StoragePath:      storagePath,
+		StoragePath:      fileInfo.Key,
 		StorageURL:       storageURL,
 		FileSize:         file.Size,
 		MimeType:         file.Header.Get("Content-Type"),
@@ -99,14 +121,14 @@ func (h *VideoHandler) Upload(c *fiber.Ctx) error {
 		Msg("Video uploaded successfully")
 
 	return utils.Created(c, dto.VideoResponse{
-		ID:           video.ID,
-		UserID:       video.UserID,
-		Title:        video.Title,
-		Description:  video.Description,
-		StorageURL:   video.StorageURL,
-		FileSize:     video.FileSize,
-		Status:       video.Status,
-		CreatedAt:    video.CreatedAt,
+		ID:          video.ID,
+		UserID:      video.UserID,
+		Title:       video.Title,
+		Description: video.Description,
+		StorageURL:  video.StorageURL,
+		FileSize:    video.FileSize,
+		Status:      video.Status,
+		CreatedAt:   video.CreatedAt,
 	})
 }
 

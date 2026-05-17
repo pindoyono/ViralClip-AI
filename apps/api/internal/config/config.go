@@ -90,6 +90,14 @@ type StorageConfig struct {
 	GCSBucket       string
 	GCSProjectID    string
 	CredentialsFile string
+
+	// Google Drive storage credentials (used when Provider == "google_drive").
+	GoogleDriveClientID     string
+	GoogleDriveClientSecret string
+	GoogleDriveRefreshToken string
+	// GoogleDriveFolderID is the Drive folder used as the root for the
+	// ViralClipAI folder tree. Empty means "My Drive" root.
+	GoogleDriveFolderID string
 }
 
 type AIConfig struct {
@@ -189,6 +197,11 @@ func Load() (*Config, error) {
 			GCSBucket:       getEnv("GCS_BUCKET_NAME", ""),
 			GCSProjectID:    getEnv("GCS_PROJECT_ID", ""),
 			CredentialsFile: getEnv("GOOGLE_APPLICATION_CREDENTIALS", ""),
+
+			GoogleDriveClientID:     getEnv("GOOGLE_DRIVE_CLIENT_ID", ""),
+			GoogleDriveClientSecret: getEnv("GOOGLE_DRIVE_CLIENT_SECRET", ""),
+			GoogleDriveRefreshToken: getEnv("GOOGLE_DRIVE_REFRESH_TOKEN", ""),
+			GoogleDriveFolderID:     getEnv("GOOGLE_DRIVE_FOLDER_ID", ""),
 		},
 		AI: AIConfig{
 			ServiceURL:  getEnv("AI_SERVICE_URL", "http://localhost:8000"),

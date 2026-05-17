@@ -1,12 +1,16 @@
 package routes
 
 import (
+	"context"
+
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/handlers"
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/middleware"
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/server"
+	"github.com/pindoyono/viralclip-ai/apps/api/internal/storage"
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/utils"
+	"github.com/rs/zerolog/log"
 )
 
 // Register sets up all application routes.
@@ -20,9 +24,15 @@ func Register(srv *server.Server) {
 		srv.Config.JWT.Issuer,
 	)
 
+	// Build the storage service once and share it with handlers that need it.
+	storageSvc, err := storage.NewStorageService(context.Background(), srv.Config)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to initialize storage service")
+	}
+
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(srv.DB, jwtManager)
-	videoHandler := handlers.NewVideoHandler(srv.DB, srv.Config.Storage.LocalPath, srv.Config.Storage.LocalURL)
+	videoHandler := handlers.NewVideoHandler(srv.DB, storageSvc)
 	clipHandler := handlers.NewClipHandler(srv.DB)
 	socialHandler := handlers.NewSocialHandler(srv.DB)
 	analyticsHandler := handlers.NewAnalyticsHandler(srv.DB)
