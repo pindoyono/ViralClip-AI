@@ -219,3 +219,48 @@ func (h *AuthHandler) Me(c *fiber.Ctx) error {
 		LastLoginAt:     user.LastLoginAt,
 	})
 }
+
+// UpdateProfile updates the current user's name and/or avatar URL.
+func (h *AuthHandler) UpdateProfile(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		return utils.Unauthorized(c, "Not authenticated")
+	}
+
+	var req dto.UpdateUserRequest
+	if err := c.BodyParser(&req); err != nil {
+		return utils.BadRequest(c, "Invalid request body")
+	}
+
+	var user models.User
+	if err := h.db.First(&user, "id = ?", userID).Error; err != nil {
+		return utils.NotFound(c, "User not found")
+	}
+
+	updates := map[string]interface{}{}
+	if req.Name != nil && *req.Name != "" {
+		updates["name"] = *req.Name
+	}
+	if req.AvatarURL != nil {
+		updates["avatar_url"] = *req.AvatarURL
+	}
+
+	if len(updates) > 0 {
+		if err := h.db.Model(&user).Updates(updates).Error; err != nil {
+			log.Error().Err(err).Msg("Failed to update user profile")
+			return utils.InternalError(c, "Failed to update profile")
+		}
+		h.db.First(&user, "id = ?", userID)
+	}
+
+	return utils.Success(c, dto.UserResponse{
+		ID:              user.ID,
+		Name:            user.Name,
+		Email:           user.Email,
+		AvatarURL:       user.AvatarURL,
+		IsEmailVerified: user.IsEmailVerified,
+		Tier:            user.Tier,
+		CreatedAt:       user.CreatedAt,
+		LastLoginAt:     user.LastLoginAt,
+	})
+}

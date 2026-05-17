@@ -82,6 +82,7 @@ func Register(srv *server.Server) {
 	// Protected routes below
 	auth.Post("/logout", authHandler.Logout)
 	auth.Get("/me", authHandler.Me)
+	auth.Patch("/me", authHandler.UpdateProfile)
 
 	// Video routes
 	videos := v1.Group("/videos")

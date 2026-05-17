@@ -45,9 +45,16 @@ export interface Clip {
 
 export interface SocialAccount {
   id: string;
+  user_id: string;
   platform: "tiktok" | "instagram" | "youtube" | "twitter";
   username: string;
+  display_name: string;
+  avatar_url: string;
+  is_active: boolean;
   is_connected: boolean;
+  followers_count: number;
+  connected_at: string;
+  last_synced_at?: string;
   expires_at?: string;
 }
 
