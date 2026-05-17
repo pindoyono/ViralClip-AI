@@ -57,8 +57,6 @@ def _safe_video_id(video_id: str) -> str:
     """
     if not _VIDEO_ID_RE.match(video_id):
         raise ValueError(f"Invalid video_id {video_id!r}: only alphanumeric characters, hyphens, and underscores are allowed")
-
-
     return video_id
 
 

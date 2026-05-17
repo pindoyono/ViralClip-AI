@@ -147,7 +147,6 @@ func main() {
 	log.Info().Msg("Worker stopped")
 }
 
-
 func setupLogger(level, format string) {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 
