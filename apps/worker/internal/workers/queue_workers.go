@@ -289,8 +289,16 @@ func (w *ClipWorker) saveClipsToDB(ctx context.Context, job *queue.Job, clips []
 }) {
 	now := time.Now().UTC()
 	for _, c := range clips {
-		hashtagsJSON, _ := json.Marshal(c.Hashtags)
-		suggestedForJSON, _ := json.Marshal(c.SuggestedFor)
+		hashtagsJSON, err := json.Marshal(c.Hashtags)
+		if err != nil {
+			log.Warn().Err(err).Str("video_id", job.VideoID).Int("clip_index", c.Index).Msg("ClipWorker: failed to marshal hashtags")
+			hashtagsJSON = []byte("[]")
+		}
+		suggestedForJSON, err := json.Marshal(c.SuggestedFor)
+		if err != nil {
+			log.Warn().Err(err).Str("video_id", job.VideoID).Int("clip_index", c.Index).Msg("ClipWorker: failed to marshal suggested_for")
+			suggestedForJSON = []byte("[]")
+		}
 
 		clip := Clip{
 			ID:           newUUID(),

@@ -64,7 +64,10 @@ func (Clip) TableName() string { return "clips" }
 // newUUID generates a random UUID v4 string without external dependencies.
 func newUUID() string {
 	b := make([]byte, 16)
-	_, _ = rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand failures are catastrophic; panic to avoid silent data corruption.
+		panic(fmt.Sprintf("crypto/rand unavailable: %v", err))
+	}
 	b[6] = (b[6] & 0x0f) | 0x40 // version 4
 	b[8] = (b[8] & 0x3f) | 0x80 // variant bits
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",

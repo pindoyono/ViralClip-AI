@@ -8,6 +8,7 @@ Each endpoint corresponds to one stage in the video processing pipeline:
 """
 import json
 import os
+import re
 import time
 
 from fastapi import APIRouter, HTTPException
@@ -45,15 +46,30 @@ _TRANSCRIPTS_SUBDIR = "transcripts"
 _CLIPS_SUBDIR = "clips"
 _THUMBNAILS_SUBDIR = "thumbnails"
 
+# Only allow safe characters in video_id to prevent path traversal via the id field.
+_VIDEO_ID_RE = re.compile(r'^[\w\-]+$')
+
+
+def _safe_video_id(video_id: str) -> str:
+    """Validate that *video_id* contains only alphanumeric chars, hyphens, and underscores.
+
+    Raises ``ValueError`` if the value would be unsafe to embed in a filesystem path.
+    """
+    if not _VIDEO_ID_RE.match(video_id):
+        raise ValueError(f"Invalid video_id {video_id!r}: only alphanumeric characters, hyphens, and underscores are allowed")
+
+
+    return video_id
+
 
 def _transcript_cache_path(video_id: str) -> str:
     d = os.path.join(settings.local_storage_path, _TRANSCRIPTS_SUBDIR)
     ensure_dir(d)
-    return os.path.join(d, f"{video_id}.json")
+    return os.path.join(d, f"{_safe_video_id(video_id)}.json")
 
 
 def _clips_dir(video_id: str) -> str:
-    d = os.path.join(settings.local_storage_path, _CLIPS_SUBDIR, video_id)
+    d = os.path.join(settings.local_storage_path, _CLIPS_SUBDIR, _safe_video_id(video_id))
     ensure_dir(d)
     return d
 
@@ -61,13 +77,13 @@ def _clips_dir(video_id: str) -> str:
 def _manifest_path(video_id: str) -> str:
     d = os.path.join(settings.local_storage_path, _CLIPS_SUBDIR)
     ensure_dir(d)
-    return os.path.join(d, f"{video_id}_manifest.json")
+    return os.path.join(d, f"{_safe_video_id(video_id)}_manifest.json")
 
 
 def _thumbnail_path(video_id: str) -> str:
     d = os.path.join(settings.local_storage_path, _THUMBNAILS_SUBDIR)
     ensure_dir(d)
-    return os.path.join(d, f"{video_id}.jpg")
+    return os.path.join(d, f"{_safe_video_id(video_id)}.jpg")
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +93,11 @@ def _thumbnail_path(video_id: str) -> str:
 @router.post("/transcript", response_model=ProcessTranscriptResponse)
 async def process_transcript(request: ProcessTranscriptRequest):
     """Transcribe a video and cache the result to disk for downstream steps."""
+    try:
+        _safe_video_id(request.video_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     try:
         safe_path = _validate_storage_path(request.storage_path, settings.local_storage_path)
     except ValueError as e:
@@ -102,7 +123,7 @@ async def process_transcript(request: ProcessTranscriptRequest):
             "segments": [s.model_dump() for s in result["segments"]],
         }
         with open(cache_path, "w", encoding="utf-8") as f:
-            json.dump(cache_data, f)
+            json.dump(cache_data, f, indent=2)
         logger.info(f"Transcript cached at {cache_path}")
     except Exception as e:
         logger.warning(f"Failed to cache transcript for {request.video_id}: {e}")
@@ -124,6 +145,11 @@ async def process_transcript(request: ProcessTranscriptRequest):
 @router.post("/clips", response_model=ProcessClipsResponse)
 async def process_clips(request: ProcessClipsRequest):
     """Identify viral segments and extract clip files from the source video."""
+    try:
+        _safe_video_id(request.video_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     try:
         safe_path = _validate_storage_path(request.storage_path, settings.local_storage_path)
     except ValueError as e:
@@ -202,7 +228,7 @@ async def process_clips(request: ProcessClipsRequest):
     try:
         manifest_data = [c.model_dump() for c in extracted]
         with open(manifest_path, "w", encoding="utf-8") as f:
-            json.dump(manifest_data, f)
+            json.dump(manifest_data, f, indent=2)
         logger.info(f"Clip manifest saved: {manifest_path} ({len(extracted)} clips)")
     except Exception as e:
         logger.warning(f"Failed to save clip manifest for {request.video_id}: {e}")
@@ -225,6 +251,11 @@ async def process_clips(request: ProcessClipsRequest):
 @router.post("/subtitles", response_model=ProcessSubtitlesResponse)
 async def process_subtitles(request: ProcessSubtitlesRequest):
     """Burn subtitles into every clip listed in the video's clip manifest."""
+    try:
+        _safe_video_id(request.video_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     # Load clip manifest.
     manifest_path = _manifest_path(request.video_id)
     if not os.path.exists(manifest_path):
@@ -253,7 +284,16 @@ async def process_subtitles(request: ProcessSubtitlesRequest):
     processed = 0
     for clip_data in manifest:
         clip_path = clip_data.get("storage_path", "")
-        if not clip_path or not os.path.exists(clip_path):
+        if not clip_path:
+            logger.warning("Clip entry missing storage_path; skipping")
+            continue
+        # Validate the clip path is inside the storage directory before use.
+        try:
+            clip_path = _validate_storage_path(clip_path, settings.local_storage_path)
+        except ValueError:
+            logger.warning(f"Clip path outside storage directory, skipping: {clip_path}")
+            continue
+        if not os.path.exists(clip_path):
             logger.warning(f"Clip file not found, skipping: {clip_path}")
             continue
 
@@ -299,6 +339,11 @@ async def process_subtitles(request: ProcessSubtitlesRequest):
 @router.post("/video", response_model=ProcessVideoResponse)
 async def process_video(request: ProcessVideoRequest):
     """Extract video metadata and generate a thumbnail for the source video."""
+    try:
+        _safe_video_id(request.video_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     try:
         safe_path = _validate_storage_path(request.storage_path, settings.local_storage_path)
     except ValueError as e:

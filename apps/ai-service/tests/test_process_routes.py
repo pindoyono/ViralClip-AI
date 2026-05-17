@@ -235,6 +235,8 @@ class TestProcessSubtitles:
         with (
             patch("app.routers.process._manifest_path", return_value=str(manifest_file)),
             patch("app.routers.process._transcript_cache_path", return_value=str(transcript_cache)),
+            # Allow the clip path (which is in /tmp) to pass the storage directory check.
+            patch("app.routers.process._validate_storage_path", side_effect=lambda p, _=None: p),
             patch("app.routers.process.burn_subtitles", new=AsyncMock(return_value={"output_path": str(clip_file), "subtitle_path": "sub.srt"})),
         ):
             from main import app
