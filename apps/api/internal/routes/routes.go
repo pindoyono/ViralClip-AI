@@ -12,6 +12,7 @@ import (
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/middleware"
 	apiqueue "github.com/pindoyono/viralclip-ai/apps/api/internal/queue"
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/server"
+	"github.com/pindoyono/viralclip-ai/apps/api/internal/services"
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/storage"
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/utils"
 )
@@ -47,7 +48,7 @@ func Register(srv *server.Server) {
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(srv.DB, jwtManager)
-	videoHandler := handlers.NewVideoHandler(srv.DB, storageSvc, queuePublisher)
+	videoHandler := handlers.NewVideoHandler(srv.DB, storageSvc, queuePublisher).WithHub(srv.Hub)
 	clipHandler := handlers.NewClipHandler(srv.DB)
 	socialHandler := handlers.NewSocialHandler(srv.DB)
 	analyticsHandler := handlers.NewAnalyticsHandler(srv.DB)
@@ -58,6 +59,8 @@ func Register(srv *server.Server) {
 	subtitleHandler := handlers.NewSubtitleHandler(srv.DB, srv.Config)
 	statusHandler := handlers.NewStatusHandler(srv.DB, srv.Redis, srv.Hub, srv.Config.JWT.Secret)
 	metadataHandler := handlers.NewMetadataHandler(srv.DB, srv.Config)
+	viralOpportunityService := services.NewViralOpportunityService(srv.DB, services.NewRecommendationEngine())
+	viralOpportunityHandler := handlers.NewViralOpportunityHandler(viralOpportunityService)
 
 	// Start the Redis Pub/Sub → WebSocket broadcaster in the background.
 	if srv.Redis != nil {
@@ -105,6 +108,7 @@ func Register(srv *server.Server) {
 	videos.Get("/:id", videoHandler.Get)
 	videos.Delete("/:id", videoHandler.Delete)
 	videos.Post("/:id/process", videoHandler.ProcessVideo)
+	videos.Get("/:id/upload-progress", videoHandler.GetUploadProgress)
 	videos.Get("/:videoId/clips", clipHandler.GetByVideo)
 
 	// Hook Detection V2 routes
@@ -139,13 +143,22 @@ func Register(srv *server.Server) {
 	social.Get("/accounts", socialHandler.ListAccounts)
 	social.Post("/accounts", socialHandler.ConnectAccount)
 	social.Delete("/accounts/:id", socialHandler.DisconnectAccount)
+	social.Post("/connect", socialHandler.Connect)
+	social.Post("/disconnect", socialHandler.Disconnect)
 	social.Post("/schedule", socialHandler.SchedulePost)
 	social.Get("/schedule", socialHandler.ListScheduledPosts)
 	social.Delete("/schedule/:id", socialHandler.CancelScheduledPost)
+	v1.Post("/schedule", socialHandler.Schedule)
+	v1.Post("/publish", socialHandler.Publish)
+	v1.Get("/publish/status", socialHandler.PublishStatus)
 
 	// Analytics routes
 	analytics := v1.Group("/analytics")
 	analytics.Get("/summary", analyticsHandler.Summary)
+	analytics.Get("/top-clips", analyticsHandler.TopClips)
+	analytics.Get("/worst-clips", analyticsHandler.WorstClips)
+	analytics.Get("/hook-patterns", analyticsHandler.HookPatterns)
+	analytics.Get("/recommendations", analyticsHandler.LearningRecommendations)
 
 	// Per-clip analytics
 	clips.Get("/:id/analytics", analyticsHandler.ClipAnalytics)
@@ -153,6 +166,12 @@ func Register(srv *server.Server) {
 	// Trending topics routes
 	trending := v1.Group("/trending")
 	trending.Get("/", trendingHandler.List)
+
+	// Viral opportunity routes
+	viralOpportunities := v1.Group("/viral-opportunities")
+	viralOpportunities.Get("/", viralOpportunityHandler.List)
+	viralOpportunities.Get("/trending", viralOpportunityHandler.Trending)
+	viralOpportunities.Get("/recommendations", viralOpportunityHandler.Recommendations)
 
 	// Content Profile routes
 	contentProfiles := v1.Group("/content-profiles")

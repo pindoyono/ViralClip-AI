@@ -364,3 +364,235 @@ func TestProcessVideo_FailedCanRetry(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, fiber.StatusOK, resp.StatusCode)
 }
+
+// ---------------------------------------------------------------------------
+// mockResumableStorageService – ResumableStorageService backed by a real tracker
+// ---------------------------------------------------------------------------
+
+type mockResumableStorageService struct {
+mockStorageService
+tracker *storage.UploadProgressTracker
+}
+
+func newMockResumableStorageService() *mockResumableStorageService {
+return &mockResumableStorageService{
+tracker: storage.NewUploadProgressTracker(),
+}
+}
+
+func (m *mockResumableStorageService) GetUploadProgress(uploadID string) (storage.UploadProgress, bool) {
+return m.tracker.Get(uploadID)
+}
+
+// setupVideoAppWithResumable sets up a Fiber app with a VideoHandler that uses
+// a ResumableStorageService, wiring up the GetUploadProgress route too.
+func setupVideoAppWithResumable(db *gorm.DB, svc *mockResumableStorageService, userID string) *fiber.App {
+app := fiber.New()
+h := NewVideoHandler(db, svc)
+
+app.Use(func(c *fiber.Ctx) error {
+if userID != "" {
+tok := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+"user_id": userID,
+"exp":     time.Now().Add(30 * time.Minute).Unix(),
+})
+signed, _ := tok.SignedString([]byte("test-secret"))
+parsed, _ := jwt.Parse(signed, func(t *jwt.Token) (interface{}, error) {
+return []byte("test-secret"), nil
+})
+c.Locals("user_token", parsed)
+}
+return c.Next()
+})
+
+app.Get("/videos/:id/upload-progress", h.GetUploadProgress)
+return app
+}
+
+// --- GetUploadProgress ---
+
+func TestGetUploadProgress_Uploading(t *testing.T) {
+db := setupVideoTestDB(t)
+userID := uuid.New()
+video := seedVideo(db, userID, models.VideoStatusPending)
+
+svc := newMockResumableStorageService()
+svc.tracker.SimulateStart(video.ID.String(), 10000)
+svc.tracker.SimulateUpdate(video.ID.String(), 6700)
+
+app := setupVideoAppWithResumable(db, svc, userID.String())
+
+req, _ := http.NewRequest("GET", fmt.Sprintf("/videos/%s/upload-progress", video.ID), nil)
+resp, err := app.Test(req)
+require.NoError(t, err)
+assert.Equal(t, fiber.StatusOK, resp.StatusCode)
+
+var body map[string]interface{}
+require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+data := body["data"].(map[string]interface{})
+assert.Equal(t, "uploading", data["status"])
+assert.InDelta(t, 67, data["progress"].(float64), 1)
+assert.Equal(t, float64(6700), data["uploaded_bytes"].(float64))
+assert.Equal(t, float64(10000), data["total_bytes"].(float64))
+}
+
+func TestGetUploadProgress_Completed(t *testing.T) {
+db := setupVideoTestDB(t)
+userID := uuid.New()
+video := seedVideo(db, userID, models.VideoStatusPending)
+
+svc := newMockResumableStorageService()
+svc.tracker.SimulateStart(video.ID.String(), 5000)
+svc.tracker.SimulateComplete(video.ID.String(), 5000)
+
+app := setupVideoAppWithResumable(db, svc, userID.String())
+
+req, _ := http.NewRequest("GET", fmt.Sprintf("/videos/%s/upload-progress", video.ID), nil)
+resp, err := app.Test(req)
+require.NoError(t, err)
+assert.Equal(t, fiber.StatusOK, resp.StatusCode)
+
+var body map[string]interface{}
+require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+data := body["data"].(map[string]interface{})
+assert.Equal(t, "completed", data["status"])
+assert.Equal(t, float64(100), data["progress"].(float64))
+}
+
+func TestGetUploadProgress_Failed(t *testing.T) {
+db := setupVideoTestDB(t)
+userID := uuid.New()
+video := seedVideo(db, userID, models.VideoStatusPending)
+
+svc := newMockResumableStorageService()
+svc.tracker.SimulateStart(video.ID.String(), 5000)
+svc.tracker.SimulateFail(video.ID.String(), "network timeout")
+
+app := setupVideoAppWithResumable(db, svc, userID.String())
+
+req, _ := http.NewRequest("GET", fmt.Sprintf("/videos/%s/upload-progress", video.ID), nil)
+resp, err := app.Test(req)
+require.NoError(t, err)
+assert.Equal(t, fiber.StatusOK, resp.StatusCode)
+
+var body map[string]interface{}
+require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+data := body["data"].(map[string]interface{})
+assert.Equal(t, "failed", data["status"])
+assert.Equal(t, "network timeout", data["error"])
+}
+
+func TestGetUploadProgress_NotFound_VideoMissing(t *testing.T) {
+db := setupVideoTestDB(t)
+userID := uuid.New()
+svc := newMockResumableStorageService()
+app := setupVideoAppWithResumable(db, svc, userID.String())
+
+req, _ := http.NewRequest("GET", fmt.Sprintf("/videos/%s/upload-progress", uuid.New()), nil)
+resp, err := app.Test(req)
+require.NoError(t, err)
+assert.Equal(t, fiber.StatusNotFound, resp.StatusCode)
+}
+
+func TestGetUploadProgress_NoContent_WhenNoTrackingEntry(t *testing.T) {
+db := setupVideoTestDB(t)
+userID := uuid.New()
+video := seedVideo(db, userID, models.VideoStatusPending)
+
+svc := newMockResumableStorageService()
+// No tracker entry seeded – tracker returns (zero, false)
+app := setupVideoAppWithResumable(db, svc, userID.String())
+
+req, _ := http.NewRequest("GET", fmt.Sprintf("/videos/%s/upload-progress", video.ID), nil)
+resp, err := app.Test(req)
+require.NoError(t, err)
+assert.Equal(t, fiber.StatusNoContent, resp.StatusCode)
+}
+
+func TestGetUploadProgress_NoContent_NonResumableBackend(t *testing.T) {
+	db := setupVideoTestDB(t)
+	userID := uuid.New()
+	video := seedVideo(db, userID, models.VideoStatusPending)
+
+	// Plain StorageService (not Resumable) – handler cannot type-assert to ResumableStorageService.
+	h := NewVideoHandler(db, &mockStorageService{})
+
+	app2 := fiber.New()
+	app2.Use(func(c *fiber.Ctx) error {
+		tok := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+			"user_id": userID.String(),
+			"exp":     time.Now().Add(30 * time.Minute).Unix(),
+		})
+		signed, _ := tok.SignedString([]byte("test-secret"))
+		parsed, _ := jwt.Parse(signed, func(t *jwt.Token) (interface{}, error) {
+			return []byte("test-secret"), nil
+		})
+		c.Locals("user_token", parsed)
+		return c.Next()
+	})
+	app2.Get("/videos/:id/upload-progress", h.GetUploadProgress)
+
+	req2, _ := http.NewRequest("GET", fmt.Sprintf("/videos/%s/upload-progress", video.ID), nil)
+	resp, err := app2.Test(req2)
+	require.NoError(t, err)
+	assert.Equal(t, fiber.StatusNoContent, resp.StatusCode)
+}
+
+func TestGetUploadProgress_Unauthenticated(t *testing.T) {
+db := setupVideoTestDB(t)
+svc := newMockResumableStorageService()
+app := setupVideoAppWithResumable(db, svc, "") // no user injected
+
+req, _ := http.NewRequest("GET", fmt.Sprintf("/videos/%s/upload-progress", uuid.New()), nil)
+resp, err := app.Test(req)
+require.NoError(t, err)
+assert.Equal(t, fiber.StatusUnauthorized, resp.StatusCode)
+}
+
+func TestGetUploadProgress_InvalidID(t *testing.T) {
+db := setupVideoTestDB(t)
+userID := uuid.New()
+svc := newMockResumableStorageService()
+app := setupVideoAppWithResumable(db, svc, userID.String())
+
+req, _ := http.NewRequest("GET", "/videos/not-a-uuid/upload-progress", nil)
+resp, err := app.Test(req)
+require.NoError(t, err)
+assert.Equal(t, fiber.StatusBadRequest, resp.StatusCode)
+}
+
+// --- toUploadProgressResponse ---
+
+func TestToUploadProgressResponse_CalculatesPercent(t *testing.T) {
+p := storage.UploadProgress{
+UploadID:      "uid-1",
+TotalBytes:    200,
+UploadedBytes: 100,
+Status:        storage.UploadStatusUploading,
+}
+r := toUploadProgressResponse("uid-1", p)
+assert.Equal(t, 50, r.Progress)
+assert.Equal(t, "uploading", r.Status)
+}
+
+func TestToUploadProgressResponse_CompletedIs100(t *testing.T) {
+p := storage.UploadProgress{
+UploadID:      "uid-2",
+TotalBytes:    0, // unknown size
+UploadedBytes: 0,
+Status:        storage.UploadStatusCompleted,
+}
+r := toUploadProgressResponse("uid-2", p)
+assert.Equal(t, 100, r.Progress)
+}
+
+func TestToUploadProgressResponse_ZeroTotalReturnsZero(t *testing.T) {
+p := storage.UploadProgress{
+UploadID:      "uid-3",
+TotalBytes:    0,
+UploadedBytes: 512,
+Status:        storage.UploadStatusUploading,
+}
+r := toUploadProgressResponse("uid-3", p)
+assert.Equal(t, 0, r.Progress)
+}

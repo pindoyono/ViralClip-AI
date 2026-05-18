@@ -354,6 +354,102 @@ curl http://localhost:8080/api/v1/videos/vid-uuid/clips \
 
 ---
 
+### Get Upload Progress (Resumable Upload)
+
+Polls the current progress of a resumable (chunked) Google Drive upload for a
+video that was just created via `POST /videos/`. The `id` must match the `id`
+returned by the upload endpoint – it is used as the internal tracking key.
+
+When the storage backend does not support resumable uploads (e.g. local
+storage), this endpoint returns **`204 No Content`** with an empty body.
+
+```
+GET /videos/:id/upload-progress
+Authorization: Bearer <token>
+```
+
+**Response `200` – upload in progress:**
+```json
+{
+  "success": true,
+  "data": {
+    "upload_id": "vid-uuid",
+    "progress": 67,
+    "status": "uploading",
+    "uploaded_bytes": 352321536,
+    "total_bytes": 524288000
+  }
+}
+```
+
+**Response `200` – upload completed:**
+```json
+{
+  "success": true,
+  "data": {
+    "upload_id": "vid-uuid",
+    "progress": 100,
+    "status": "completed",
+    "uploaded_bytes": 524288000,
+    "total_bytes": 524288000
+  }
+}
+```
+
+**Response `200` – upload failed:**
+```json
+{
+  "success": true,
+  "data": {
+    "upload_id": "vid-uuid",
+    "progress": 42,
+    "status": "failed",
+    "uploaded_bytes": 220200960,
+    "total_bytes": 524288000,
+    "error": "chunk upload failed after 5 retries: status 503"
+  }
+}
+```
+
+**Response `204 No Content`** – storage backend does not support resumable uploads, or the tracking entry has already been cleaned up.
+
+**Status values:**
+| Value       | Description                                   |
+|-------------|-----------------------------------------------|
+| `uploading` | Upload is in progress                         |
+| `completed` | Upload finished successfully                  |
+| `failed`    | Upload failed permanently after all retries   |
+
+**WebSocket real-time updates:**
+
+When the Google Drive storage backend is in use **and** the client has an
+active WebSocket connection (see [WebSocket](#websocket)), the server pushes
+progress events approximately every 500 ms during the upload:
+
+```json
+{
+  "type": "upload_progress",
+  "video_id": "vid-uuid",
+  "payload": {
+    "upload_id": "vid-uuid",
+    "progress": 67,
+    "status": "uploading",
+    "uploaded_bytes": 352321536,
+    "total_bytes": 524288000
+  }
+}
+```
+
+The final event has `"status": "completed"` or `"status": "failed"`.
+
+**curl example:**
+```bash
+curl http://localhost:8080/api/v1/videos/vid-uuid/upload-progress \
+  -H "Authorization: Bearer eyJhbGci..."
+```
+
+---
+
 ## Clips
 
 ### List Clips
@@ -504,16 +600,51 @@ curl -X POST http://localhost:8080/api/v1/clips/clip-uuid/metadata/enhance \
 
 ## Social & Scheduling
 
-### List Connected Accounts
+### Connect Social Account (OAuth/token payload)
 
 ```
-GET /social/accounts
+POST /social/connect
 Authorization: Bearer <token>
+```
+
+**Request body:**
+```json
+{
+  "platform": "tiktok",
+  "username": "creator_handle",
+  "access_token": "token",
+  "refresh_token": "refresh_token",
+  "expires_at": "2026-05-18T22:00:00Z"
+}
 ```
 
 **curl example:**
 ```bash
-curl http://localhost:8080/api/v1/social/accounts \
+curl -X POST http://localhost:8080/api/v1/social/connect \
+  -H "Authorization: Bearer eyJhbGci..." \
+  -H "Content-Type: application/json" \
+  -d '{"platform":"tiktok","username":"creator_handle","access_token":"token","refresh_token":"refresh_token"}'
+```
+
+---
+
+### Disconnect Social Account
+
+```
+POST /social/disconnect
+Authorization: Bearer <token>
+```
+
+**Request body:**
+```json
+{
+  "account_id": "account-uuid"
+}
+```
+
+**curl example:**
+```bash
+curl -X POST http://localhost:8080/api/v1/social/disconnect \
   -H "Authorization: Bearer eyJhbGci..."
 ```
 
@@ -522,7 +653,7 @@ curl http://localhost:8080/api/v1/social/accounts \
 ### Schedule a Post
 
 ```
-POST /social/schedule
+POST /schedule
 Authorization: Bearer <token>
 ```
 
@@ -532,6 +663,7 @@ Authorization: Bearer <token>
   "clip_id": "clip-uuid",
   "social_account_id": "account-uuid",
   "scheduled_at": "2024-01-20T18:00:00Z",
+  "publish_at": "2024-01-20T18:00:00Z",
   "caption": "Check out this amazing moment! 🔥",
   "hashtags": "#viral #trending"
 }
@@ -539,41 +671,58 @@ Authorization: Bearer <token>
 
 **curl example:**
 ```bash
-curl -X POST http://localhost:8080/api/v1/social/schedule \
+curl -X POST http://localhost:8080/api/v1/schedule \
   -H "Authorization: Bearer eyJhbGci..." \
   -H "Content-Type: application/json" \
-  -d '{"clip_id":"clip-uuid","social_account_id":"acc-uuid","scheduled_at":"2024-01-20T18:00:00Z","caption":"Amazing clip!"}'
+  -d '{"clip_id":"clip-uuid","social_account_id":"acc-uuid","scheduled_at":"2024-01-20T18:00:00Z","publish_at":"2024-01-20T18:00:00Z","caption":"Amazing clip!"}'
 ```
 
 ---
 
-### List Scheduled Posts
+### Publish Now
 
 ```
-GET /social/schedule
+POST /publish
+Authorization: Bearer <token>
+```
+
+**Request body:**
+```json
+{
+  "clip_id": "clip-uuid",
+  "social_account_id": "account-uuid",
+  "caption": "Publish immediately",
+  "hashtags": "#viral"
+}
+```
+
+**curl example:**
+```bash
+curl -X POST http://localhost:8080/api/v1/publish \
+  -H "Authorization: Bearer eyJhbGci..." \
+  -H "Content-Type: application/json" \
+  -d '{"clip_id":"clip-uuid","social_account_id":"acc-uuid","caption":"Publish now"}'
+```
+
+---
+
+### Publish Status
+
+```
+GET /publish/status?post_id=<post-uuid>
 Authorization: Bearer <token>
 ```
 
 **curl example:**
 ```bash
-curl http://localhost:8080/api/v1/social/schedule \
+curl http://localhost:8080/api/v1/publish/status?post_id=post-uuid \
   -H "Authorization: Bearer eyJhbGci..."
 ```
 
----
-
-### Cancel Scheduled Post
-
-```
-DELETE /social/schedule/:id
-Authorization: Bearer <token>
-```
-
-**curl example:**
-```bash
-curl -X DELETE http://localhost:8080/api/v1/social/schedule/post-uuid \
-  -H "Authorization: Bearer eyJhbGci..."
-```
+`PublishStatus` returns:
+- current post status (`scheduled`, `publishing`, `published`, `failed`, `cancelled`)
+- retry count and last error message
+- ordered publish attempt logs from `publishing_logs`
 
 ---
 
@@ -610,6 +759,144 @@ curl http://localhost:8080/api/v1/analytics/summary \
 ```
 
 ---
+
+## Learning Feedback Engine
+
+The Learning Feedback Engine calculates a **Content Performance Score (CPS)** per clip using:
+
+```
+CPS = WatchTime×30% + Retention×25% + Engagement×20% + CTR×15% + SubscriberGain×10%
+```
+
+Each component is normalised to 0–1 before weighting. The final CPS is on a 0–100 scale.
+
+### Top Performing Clips
+
+```
+GET /analytics/top-clips?platform=tiktok
+Authorization: Bearer <token>
+```
+
+**Query parameters:**
+| Parameter  | Type   | Description                                         |
+|------------|--------|-----------------------------------------------------|
+| `platform` | String | Optional filter: `tiktok`, `youtube`, `instagram`   |
+
+**Response `200`:**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "clip_id": "clip-uuid",
+      "title": "Epic Boss Fight Moment",
+      "platform": "tiktok",
+      "cps": 72.5,
+      "views": 145000,
+      "likes": 12000,
+      "comments": 430,
+      "watch_time": 22.4,
+      "duration": 30,
+      "viral_score": 0.91
+    }
+  ]
+}
+```
+
+**curl example:**
+```bash
+curl "http://localhost:8080/api/v1/analytics/top-clips?platform=tiktok" \
+  -H "Authorization: Bearer eyJhbGci..."
+```
+
+---
+
+### Worst Performing Clips
+
+```
+GET /analytics/worst-clips?platform=tiktok
+Authorization: Bearer <token>
+```
+
+Returns clips with the lowest CPS. Same query parameters and response shape as `/analytics/top-clips`.
+
+**curl example:**
+```bash
+curl "http://localhost:8080/api/v1/analytics/worst-clips" \
+  -H "Authorization: Bearer eyJhbGci..."
+```
+
+---
+
+### Hook Performance Patterns
+
+```
+GET /analytics/hook-patterns?platform=tiktok
+Authorization: Bearer <token>
+```
+
+Returns CPS aggregated by hook type (`curiosity`, `emotion`, `storytelling`, `controversy`, `cta`).
+
+**Response `200`:**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "hook_type": "storytelling",
+      "avg_cps": 68.3,
+      "clip_count": 14,
+      "avg_views": 93000,
+      "improvement_pct": 35.2
+    }
+  ]
+}
+```
+
+`improvement_pct` is the percentage better (+) or worse (−) than the average hook type CPS.
+
+**curl example:**
+```bash
+curl "http://localhost:8080/api/v1/analytics/hook-patterns" \
+  -H "Authorization: Bearer eyJhbGci..."
+```
+
+---
+
+### Content Recommendations
+
+```
+GET /analytics/recommendations
+Authorization: Bearer <token>
+```
+
+Returns learning-based insights per content profile, e.g.:
+- `"Storytelling hooks perform 35% better for Gaming profile"`
+- `"Shorter clips perform 18% better for Comedy profile"`
+
+**Response `200`:**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "profile_name": "Gaming Core",
+      "platform": "tiktok",
+      "insight": "Storytelling hooks perform 35% better for Gaming Core profile",
+      "confidence": 0.75
+    }
+  ]
+}
+```
+
+**curl example:**
+```bash
+curl http://localhost:8080/api/v1/analytics/recommendations \
+  -H "Authorization: Bearer eyJhbGci..."
+```
+
+---
+
 
 ## Trending Topics
 

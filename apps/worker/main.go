@@ -18,6 +18,7 @@ import (
 
 	"github.com/pindoyono/viralclip-ai/apps/worker/internal/config"
 	"github.com/pindoyono/viralclip-ai/apps/worker/internal/queue"
+	"github.com/pindoyono/viralclip-ai/apps/worker/internal/trends"
 	"github.com/pindoyono/viralclip-ai/apps/worker/internal/workers"
 )
 
@@ -61,9 +62,15 @@ func main() {
 	analyticsQueueWorker := workers.NewQueueAnalyticsWorker(db, queueCli, cfg.Worker.MaxRetries)
 
 	// Time-based workers retained for their specific scheduling needs.
+	schedulerWorker := workers.NewSchedulerWorker(db, rdb)
 	publishingWorker := workers.NewPublishingWorker(db, rdb)
 	cleanupWorker := workers.NewCleanupWorker(db, rdb)
 	analyticsWorker := workers.NewAnalyticsWorker(db, rdb)
+	trendCollectorWorker := trends.NewTrendCollectorWorker(
+		db,
+		trends.NewYouTubeCollector(cfg.YouTube.DataAPIKey, cfg.YouTube.RegionCode, cfg.YouTube.MaxResults, cfg.YouTube.Lookback, nil),
+		trends.NewTrendEngine(),
+	)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -90,6 +97,22 @@ func main() {
 	startQueueWorker("analytics_queue", analyticsQueueWorker.Start)
 
 	// --- Time-based worker goroutines ---
+
+	// Scheduler loop (every 30 seconds)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				schedulerWorker.EnqueueDuePosts(ctx)
+			}
+		}
+	}()
 
 	// Publishing loop (every minute)
 	wg.Add(1)
@@ -139,6 +162,26 @@ func main() {
 		}
 	}()
 
+	// Trend collection loop (immediate run, then every hour)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := trendCollectorWorker.RunOnce(ctx); err != nil {
+			log.Error().Err(err).Msg("TrendCollectorWorker initial run failed")
+		}
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := trendCollectorWorker.RunOnce(ctx); err != nil {
+					log.Error().Err(err).Msg("TrendCollectorWorker run failed")
+				}
+			}
+		}
+	}()
 	// Wait for interrupt signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)

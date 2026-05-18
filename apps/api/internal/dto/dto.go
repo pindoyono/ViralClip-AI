@@ -47,14 +47,14 @@ type AuthResponse struct {
 // =============================================================================
 
 type UserResponse struct {
-	ID              uuid.UUID              `json:"id"`
-	Name            string                 `json:"name"`
-	Email           string                 `json:"email"`
-	AvatarURL       string                 `json:"avatar_url"`
-	IsEmailVerified bool                   `json:"is_email_verified"`
+	ID              uuid.UUID               `json:"id"`
+	Name            string                  `json:"name"`
+	Email           string                  `json:"email"`
+	AvatarURL       string                  `json:"avatar_url"`
+	IsEmailVerified bool                    `json:"is_email_verified"`
 	Tier            models.SubscriptionTier `json:"tier"`
-	CreatedAt       time.Time              `json:"created_at"`
-	LastLoginAt     *time.Time             `json:"last_login_at,omitempty"`
+	CreatedAt       time.Time               `json:"created_at"`
+	LastLoginAt     *time.Time              `json:"last_login_at,omitempty"`
 }
 
 type UpdateUserRequest struct {
@@ -195,12 +195,18 @@ type SocialAccountResponse struct {
 }
 
 type ConnectSocialAccountRequest struct {
-	Platform       string `json:"platform" validate:"required,oneof=tiktok instagram youtube twitter"`
-	Username       string `json:"username" validate:"required,min=1,max=100"`
-	DisplayName    string `json:"display_name"`
-	AvatarURL      string `json:"avatar_url"`
-	AccessToken    string `json:"access_token"`
-	FollowersCount int64  `json:"followers_count"`
+	Platform       string     `json:"platform" validate:"required,oneof=tiktok instagram youtube twitter"`
+	Username       string     `json:"username" validate:"required,min=1,max=100"`
+	DisplayName    string     `json:"display_name"`
+	AvatarURL      string     `json:"avatar_url"`
+	AccessToken    string     `json:"access_token"`
+	RefreshToken   string     `json:"refresh_token"`
+	ExpiresAt      *time.Time `json:"expires_at"`
+	FollowersCount int64      `json:"followers_count"`
+}
+
+type DisconnectSocialAccountRequest struct {
+	AccountID uuid.UUID `json:"account_id" validate:"required"`
 }
 
 // =============================================================================
@@ -208,9 +214,17 @@ type ConnectSocialAccountRequest struct {
 // =============================================================================
 
 type CreateScheduledPostRequest struct {
+	ClipID          uuid.UUID  `json:"clip_id" validate:"required"`
+	SocialAccountID uuid.UUID  `json:"social_account_id" validate:"required"`
+	ScheduledAt     time.Time  `json:"scheduled_at" validate:"required"`
+	PublishAt       *time.Time `json:"publish_at,omitempty"`
+	Caption         string     `json:"caption"`
+	Hashtags        string     `json:"hashtags"`
+}
+
+type PublishNowRequest struct {
 	ClipID          uuid.UUID `json:"clip_id" validate:"required"`
 	SocialAccountID uuid.UUID `json:"social_account_id" validate:"required"`
-	ScheduledAt     time.Time `json:"scheduled_at" validate:"required"`
 	Caption         string    `json:"caption"`
 	Hashtags        string    `json:"hashtags"`
 }
@@ -222,6 +236,7 @@ type ScheduledPostResponse struct {
 	SocialAccountID uuid.UUID             `json:"social_account_id"`
 	Platform        models.SocialPlatform `json:"platform"`
 	ScheduledAt     time.Time             `json:"scheduled_at"`
+	PublishAt       *time.Time            `json:"publish_at,omitempty"`
 	PublishedAt     *time.Time            `json:"published_at,omitempty"`
 	Caption         string                `json:"caption"`
 	Hashtags        string                `json:"hashtags"`
@@ -232,22 +247,35 @@ type ScheduledPostResponse struct {
 	Clip            *ClipResponse         `json:"clip,omitempty"`
 }
 
+type PublishingLogResponse struct {
+	ID        uuid.UUID         `json:"id"`
+	PostID    uuid.UUID         `json:"post_id"`
+	Status    models.PostStatus `json:"status"`
+	Message   string            `json:"message"`
+	CreatedAt time.Time         `json:"created_at"`
+}
+
+type PublishStatusResponse struct {
+	Post ScheduledPostResponse   `json:"post"`
+	Logs []PublishingLogResponse `json:"logs"`
+}
+
 // =============================================================================
 // Analytics DTOs
 // =============================================================================
 
 type AnalyticsSummaryResponse struct {
-	TotalViews      int64         `json:"total_views"`
-	TotalLikes      int64         `json:"total_likes"`
-	TotalComments   int64         `json:"total_comments"`
-	TotalShares     int64         `json:"total_shares"`
-	AvgEngagement   float64       `json:"avg_engagement_rate"`
-	TopClip         *ClipResponse `json:"top_clip,omitempty"`
-	TopPlatform     string        `json:"top_platform"`
-	PublishedClips  int           `json:"published_clips"`
+	TotalViews     int64         `json:"total_views"`
+	TotalLikes     int64         `json:"total_likes"`
+	TotalComments  int64         `json:"total_comments"`
+	TotalShares    int64         `json:"total_shares"`
+	AvgEngagement  float64       `json:"avg_engagement_rate"`
+	TopClip        *ClipResponse `json:"top_clip,omitempty"`
+	TopPlatform    string        `json:"top_platform"`
+	PublishedClips int           `json:"published_clips"`
 	// ClipsPublished is an alias for PublishedClips kept for backward compatibility.
-	ClipsPublished  int           `json:"clips_published"`
-	ScheduledPosts  int           `json:"scheduled_posts"`
+	ClipsPublished int `json:"clips_published"`
+	ScheduledPosts int `json:"scheduled_posts"`
 }
 
 // ClipAnalyticsResponse represents per-platform analytics for a single clip.
@@ -279,6 +307,45 @@ type TrendingTopicResponse struct {
 	PostCount  int64                 `json:"post_count"`
 	GrowthRate float64               `json:"growth_rate"`
 	ExpiresAt  time.Time             `json:"expires_at"`
+}
+
+type ViralOpportunityResponse struct {
+	ID              uuid.UUID `json:"id"`
+	SourcePlatform  string    `json:"source_platform"`
+	ExternalVideoID string    `json:"external_video_id"`
+	ChannelID       string    `json:"channel_id"`
+	Title           string    `json:"title"`
+	Category        string    `json:"category"`
+	SourceQuery     string    `json:"source_query"`
+	Views           int64     `json:"views"`
+	PreviousViews   int64     `json:"previous_views"`
+	Likes           int64     `json:"likes"`
+	Comments        int64     `json:"comments"`
+	SubscriberCount int64     `json:"subscriber_count"`
+	PublishedAt     time.Time `json:"published_at"`
+	LastCollectedAt time.Time `json:"last_collected_at"`
+	ViewVelocity    float64   `json:"view_velocity"`
+	EngagementRate  float64   `json:"engagement_rate"`
+	OutlierScore    float64   `json:"outlier_score"`
+	GrowthScore     float64   `json:"growth_score"`
+	ViralScore      float64   `json:"viral_score"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type ViralOpportunityListResponse struct {
+	Data       []ViralOpportunityResponse `json:"data"`
+	Total      int64                      `json:"total"`
+	Page       int                        `json:"page"`
+	Limit      int                        `json:"limit"`
+	TotalPages int                        `json:"total_pages"`
+}
+
+type ViralOpportunityRecommendationResponse struct {
+	Opportunity         ViralOpportunityResponse `json:"opportunity"`
+	RecommendationScore float64                  `json:"recommendation_score"`
+	Reasons             []string                 `json:"reasons"`
+	MatchedProfiles     []string                 `json:"matched_profiles"`
 }
 
 // =============================================================================
@@ -387,15 +454,15 @@ type ClipV2HookDetection struct {
 // ClipV2GenerateRequest is the request body for POST /api/v1/videos/:id/clips/v2/generate.
 type ClipV2GenerateRequest struct {
 	Segments     []ClipV2Segment `json:"segments" validate:"required,min=1"`
-	ProfileType  string          `json:"profile_type"`  // gaming|comedy|education|politics|podcast|general
+	ProfileType  string          `json:"profile_type"`   // gaming|comedy|education|politics|podcast|general
 	MinClipScore int             `json:"min_clip_score"` // default 50
 	MaxClips     int             `json:"max_clips"`      // default 10
 }
 
 // ClipV2ResultItem is a single clip candidate returned from the V2 engine.
 type ClipV2ResultItem struct {
-	Start          string  `json:"start"`           // HH:MM:SS
-	End            string  `json:"end"`             // HH:MM:SS
+	Start          string  `json:"start"` // HH:MM:SS
+	End            string  `json:"end"`   // HH:MM:SS
 	StartSeconds   float64 `json:"start_seconds"`
 	EndSeconds     float64 `json:"end_seconds"`
 	Score          int     `json:"score"`
@@ -518,4 +585,62 @@ type MetadataEnhanceResponse struct {
 	Category string `json:"category"`
 	// OptimalPostTimes contains suggested posting times (e.g. "7:00 PM EST on Weekdays").
 	OptimalPostTimes []string `json:"optimal_post_times"`
+}
+
+// =============================================================================
+// Learning Feedback Engine DTOs (Task 3)
+// =============================================================================
+
+// ClipCPSResponse is a clip decorated with its Content Performance Score.
+type ClipCPSResponse struct {
+	ClipID     uuid.UUID `json:"clip_id"`
+	Title      string    `json:"title"`
+	Platform   string    `json:"platform"`
+	CPS        float64   `json:"cps"`
+	Views      int64     `json:"views"`
+	Likes      int64     `json:"likes"`
+	Comments   int64     `json:"comments"`
+	WatchTime  float64   `json:"watch_time"`
+	Duration   float64   `json:"duration"`
+	ViralScore float64   `json:"viral_score"`
+}
+
+// HookPatternResponse describes CPS performance aggregated by hook type.
+type HookPatternResponse struct {
+	HookType    string  `json:"hook_type"`
+	AvgCPS      float64 `json:"avg_cps"`
+	ClipCount   int     `json:"clip_count"`
+	AvgViews    float64 `json:"avg_views"`
+	Improvement float64 `json:"improvement_pct"` // % improvement over baseline
+}
+
+// RecommendationResponse is a human-readable learning insight.
+type RecommendationResponse struct {
+	ProfileName string  `json:"profile_name"`
+	Platform    string  `json:"platform"`
+	Insight     string  `json:"insight"`
+	Confidence  float64 `json:"confidence"`
+}
+
+// =============================================================================
+// Resumable Upload DTOs (Task 5)
+// =============================================================================
+
+// UploadProgressResponse is returned by GET /api/v1/videos/:id/upload-progress.
+// It also matches the shape pushed over WebSocket:
+//
+//	{"progress": 67, "status": "uploading"}
+type UploadProgressResponse struct {
+	// UploadID is the identifier used to track this upload session.
+	UploadID string `json:"upload_id"`
+	// Progress is the percentage of bytes uploaded (0–100).
+	Progress int `json:"progress"`
+	// Status is the current upload state: "uploading", "completed", or "failed".
+	Status string `json:"status"`
+	// UploadedBytes is the number of bytes confirmed received by the storage backend.
+	UploadedBytes int64 `json:"uploaded_bytes"`
+	// TotalBytes is the expected total file size in bytes.
+	TotalBytes int64 `json:"total_bytes"`
+	// Error contains a description when Status is "failed".
+	Error string `json:"error,omitempty"`
 }

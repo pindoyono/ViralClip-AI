@@ -20,7 +20,7 @@ func setupWorkerDB(t *testing.T) *gorm.DB {
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&Video{}, &Clip{}))
+	require.NoError(t, db.AutoMigrate(&Video{}, &Clip{}, &SocialAccount{}, &ScheduledPost{}, &PublishingLog{}))
 	return db
 }
 
@@ -51,6 +51,156 @@ func TestNewPublishingWorker(t *testing.T) {
 
 	assert.NotNil(t, w)
 	assert.Equal(t, 60*time.Second, w.httpClient.Timeout)
+	assert.Equal(t, 3, w.maxRetries)
+}
+
+func TestNewSchedulerWorker(t *testing.T) {
+	db := setupWorkerDB(t)
+	w := NewSchedulerWorker(db, nil)
+	assert.NotNil(t, w)
+}
+
+func TestSchedulerWorker_EnqueueDuePosts(t *testing.T) {
+	db := setupWorkerDB(t)
+	w := NewSchedulerWorker(db, nil)
+
+	now := time.Now().UTC().Add(-1 * time.Minute)
+	post := ScheduledPost{
+		ID:              "sched-1",
+		ClipID:          "clip-1",
+		UserID:          "user-1",
+		SocialAccountID: "acc-1",
+		Platform:        "tiktok",
+		ScheduledAt:     now,
+		PublishAt:       &now,
+		Status:          "scheduled",
+		CreatedAt:       time.Now().UTC(),
+		UpdatedAt:       time.Now().UTC(),
+	}
+	require.NoError(t, db.Create(&post).Error)
+
+	w.EnqueueDuePosts(context.Background())
+
+	var updated ScheduledPost
+	require.NoError(t, db.First(&updated, "id = ?", "sched-1").Error)
+	assert.Equal(t, "publishing", updated.Status)
+}
+
+func TestPublishingWorker_ProcessScheduledPosts_Success(t *testing.T) {
+	db := setupWorkerDB(t)
+	w := NewPublishingWorker(db, nil)
+
+	exp := time.Now().UTC().Add(1 * time.Hour)
+	require.NoError(t, db.Create(&SocialAccount{
+		ID:             "acc-1",
+		UserID:         "user-1",
+		Platform:       "tiktok",
+		AccessToken:    "token-ok",
+		RefreshToken:   "refresh-ok",
+		TokenExpiresAt: &exp,
+		IsActive:       true,
+	}).Error)
+
+	now := time.Now().UTC()
+	require.NoError(t, db.Create(&ScheduledPost{
+		ID:              "post-1",
+		ClipID:          "clip-1",
+		UserID:          "user-1",
+		SocialAccountID: "acc-1",
+		Platform:        "tiktok",
+		ScheduledAt:     now,
+		PublishAt:       &now,
+		Status:          "publishing",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}).Error)
+
+	w.ProcessScheduledPosts(context.Background())
+
+	var updated ScheduledPost
+	require.NoError(t, db.First(&updated, "id = ?", "post-1").Error)
+	assert.Equal(t, "published", updated.Status)
+	assert.NotEmpty(t, updated.PlatformPostID)
+
+	var logs []PublishingLog
+	require.NoError(t, db.Where("post_id = ?", "post-1").Find(&logs).Error)
+	assert.GreaterOrEqual(t, len(logs), 2)
+}
+
+func TestPublishingWorker_ProcessScheduledPosts_RefreshesExpiredToken(t *testing.T) {
+	db := setupWorkerDB(t)
+	w := NewPublishingWorker(db, nil)
+
+	expired := time.Now().UTC().Add(-1 * time.Minute)
+	require.NoError(t, db.Create(&SocialAccount{
+		ID:             "acc-expired",
+		UserID:         "user-1",
+		Platform:       "youtube",
+		AccessToken:    "old-token",
+		RefreshToken:   "refresh-xyz",
+		TokenExpiresAt: &expired,
+		IsActive:       true,
+	}).Error)
+
+	now := time.Now().UTC()
+	require.NoError(t, db.Create(&ScheduledPost{
+		ID:              "post-expired",
+		ClipID:          "clip-1",
+		UserID:          "user-1",
+		SocialAccountID: "acc-expired",
+		Platform:        "youtube",
+		ScheduledAt:     now,
+		PublishAt:       &now,
+		Status:          "publishing",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}).Error)
+
+	w.ProcessScheduledPosts(context.Background())
+
+	var account SocialAccount
+	require.NoError(t, db.First(&account, "id = ?", "acc-expired").Error)
+	assert.Contains(t, account.AccessToken, "refreshed_")
+
+	var post ScheduledPost
+	require.NoError(t, db.First(&post, "id = ?", "post-expired").Error)
+	assert.Equal(t, "published", post.Status)
+}
+
+func TestPublishingWorker_ProcessScheduledPosts_RetriesWhenNoToken(t *testing.T) {
+	db := setupWorkerDB(t)
+	w := NewPublishingWorker(db, nil)
+
+	require.NoError(t, db.Create(&SocialAccount{
+		ID:           "acc-missing-token",
+		UserID:       "user-1",
+		Platform:     "instagram",
+		AccessToken:  "",
+		RefreshToken: "",
+		IsActive:     true,
+	}).Error)
+
+	now := time.Now().UTC()
+	require.NoError(t, db.Create(&ScheduledPost{
+		ID:              "post-retry",
+		ClipID:          "clip-1",
+		UserID:          "user-1",
+		SocialAccountID: "acc-missing-token",
+		Platform:        "instagram",
+		ScheduledAt:     now,
+		PublishAt:       &now,
+		Status:          "publishing",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}).Error)
+
+	w.ProcessScheduledPosts(context.Background())
+
+	var post ScheduledPost
+	require.NoError(t, db.First(&post, "id = ?", "post-retry").Error)
+	assert.Equal(t, "scheduled", post.Status)
+	assert.Equal(t, 1, post.RetryCount)
+	assert.NotEmpty(t, post.ErrorMessage)
 }
 
 // --- CleanupWorker ---

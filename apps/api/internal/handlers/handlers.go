@@ -11,6 +11,7 @@ import (
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/dto"
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/middleware"
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/models"
+	"github.com/pindoyono/viralclip-ai/apps/api/internal/services"
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/utils"
 )
 
@@ -224,12 +225,13 @@ func toClipResponse(clip models.Clip) dto.ClipResponse {
 
 // AnalyticsHandler handles analytics requests.
 type AnalyticsHandler struct {
-	db *gorm.DB
+	db             *gorm.DB
+	learningEngine *services.LearningEngine
 }
 
 // NewAnalyticsHandler creates a new AnalyticsHandler.
 func NewAnalyticsHandler(db *gorm.DB) *AnalyticsHandler {
-	return &AnalyticsHandler{db: db}
+	return &AnalyticsHandler{db: db, learningEngine: services.NewLearningEngine(db)}
 }
 
 // Summary returns analytics summary for the authenticated user.
@@ -337,6 +339,118 @@ func (h *AnalyticsHandler) ClipAnalytics(c *fiber.Ctx) error {
 	}
 
 	return utils.Success(c, responses)
+}
+
+// TopClips returns the clips with the highest CPS for the authenticated user.
+func (h *AnalyticsHandler) TopClips(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		return utils.Unauthorized(c, "Not authenticated")
+	}
+
+	platform := c.Query("platform")
+	limit := 10
+
+	clips, err := h.learningEngine.TopClips(c.Context(), userID, platform, limit)
+	if err != nil {
+		log.Error().Err(err).Msg("TopClips: failed to compute")
+		return utils.InternalError(c, "Failed to fetch top clips")
+	}
+
+	return utils.Success(c, toClipCPSResponses(clips))
+}
+
+// WorstClips returns the clips with the lowest CPS for the authenticated user.
+func (h *AnalyticsHandler) WorstClips(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		return utils.Unauthorized(c, "Not authenticated")
+	}
+
+	platform := c.Query("platform")
+	limit := 10
+
+	clips, err := h.learningEngine.WorstClips(c.Context(), userID, platform, limit)
+	if err != nil {
+		log.Error().Err(err).Msg("WorstClips: failed to compute")
+		return utils.InternalError(c, "Failed to fetch worst clips")
+	}
+
+	return utils.Success(c, toClipCPSResponses(clips))
+}
+
+// HookPatterns returns hook-type performance aggregation for the user.
+func (h *AnalyticsHandler) HookPatterns(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		return utils.Unauthorized(c, "Not authenticated")
+	}
+
+	platform := c.Query("platform")
+
+	patterns, err := h.learningEngine.HookPatterns(c.Context(), userID, platform)
+	if err != nil {
+		log.Error().Err(err).Msg("HookPatterns: failed to compute")
+		return utils.InternalError(c, "Failed to fetch hook patterns")
+	}
+
+	responses := make([]dto.HookPatternResponse, len(patterns))
+	for i, p := range patterns {
+		responses[i] = dto.HookPatternResponse{
+			HookType:    p.HookType,
+			AvgCPS:      p.AvgCPS,
+			ClipCount:   p.ClipCount,
+			AvgViews:    p.AvgViews,
+			Improvement: p.Improvement,
+		}
+	}
+
+	return utils.Success(c, responses)
+}
+
+// LearningRecommendations returns learning-based content recommendations for the user.
+func (h *AnalyticsHandler) LearningRecommendations(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		return utils.Unauthorized(c, "Not authenticated")
+	}
+
+	recs, err := h.learningEngine.Recommendations(c.Context(), userID)
+	if err != nil {
+		log.Error().Err(err).Msg("Recommendations: failed to compute")
+		return utils.InternalError(c, "Failed to generate recommendations")
+	}
+
+	responses := make([]dto.RecommendationResponse, len(recs))
+	for i, r := range recs {
+		responses[i] = dto.RecommendationResponse{
+			ProfileName: r.ProfileName,
+			Platform:    r.Platform,
+			Insight:     r.Insight,
+			Confidence:  r.Confidence,
+		}
+	}
+
+	return utils.Success(c, responses)
+}
+
+func toClipCPSResponses(clips []services.ClipWithCPS) []dto.ClipCPSResponse {
+	out := make([]dto.ClipCPSResponse, len(clips))
+	for i, c := range clips {
+		out[i] = dto.ClipCPSResponse{
+			ClipID:     c.ClipID,
+			Title:      c.Title,
+			Platform:   c.Platform,
+			CPS:        c.CPS,
+			Views:      c.Views,
+			Likes:      c.Likes,
+			Comments:   c.Comments,
+			WatchTime:  c.WatchTime,
+			Duration:   c.Duration,
+			ViralScore: c.ViralScore,
+		}
+	}
+	return out
 }
 
 // TrendingHandler handles trending topic requests.
