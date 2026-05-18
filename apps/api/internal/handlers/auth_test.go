@@ -403,3 +403,150 @@ func TestMe_ReturnsCurrentUser(t *testing.T) {
 	assert.Equal(t, "me@example.com", data["email"])
 	assert.Equal(t, "pro", data["tier"])
 }
+
+// --- ChangePassword ---
+
+func setupAuthAppWithPassword(db *gorm.DB, userID string) *fiber.App {
+	app := fiber.New()
+	jwtManager := utils.NewJWTManager("test-secret-32-chars-1234567890ab", 15*time.Minute, 7*24*time.Hour, "test")
+	h := NewAuthHandler(db, jwtManager)
+
+	app.Use(func(c *fiber.Ctx) error {
+		if userID != "" {
+			tok := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+				"user_id": userID,
+				"exp":     time.Now().Add(15 * time.Minute).Unix(),
+			})
+			signed, _ := tok.SignedString([]byte("test-secret"))
+			parsed, _ := jwt.Parse(signed, func(t *jwt.Token) (interface{}, error) {
+				return []byte("test-secret"), nil
+			})
+			c.Locals("user_token", parsed)
+		}
+		return c.Next()
+	})
+
+	app.Patch("/me/password", h.ChangePassword)
+	return app
+}
+
+func TestChangePassword_Success(t *testing.T) {
+	db := setupAuthTestDB(t)
+
+	id := uuid.New()
+	hash, _ := utils.HashPassword("oldpassword123")
+	db.Create(&models.User{
+		Base:         models.Base{ID: id},
+		Name:         "User",
+		Email:        "pw@example.com",
+		PasswordHash: hash,
+		Tier:         models.TierFree,
+		IsActive:     true,
+	})
+
+	app := setupAuthAppWithPassword(db, id.String())
+
+	resp, err := patchJSON(app, "/me/password", map[string]string{
+		"current_password": "oldpassword123",
+		"new_password":     "newpassword456",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, fiber.StatusOK, resp.StatusCode)
+
+	var body map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	assert.True(t, body["success"].(bool))
+
+	// Verify new password was stored.
+	var user models.User
+	db.First(&user, "id = ?", id)
+	assert.True(t, utils.CheckPasswordHash("newpassword456", user.PasswordHash))
+}
+
+func TestChangePassword_WrongCurrentPassword(t *testing.T) {
+	db := setupAuthTestDB(t)
+
+	id := uuid.New()
+	hash, _ := utils.HashPassword("correctpassword")
+	db.Create(&models.User{
+		Base:         models.Base{ID: id},
+		Name:         "User",
+		Email:        "pw2@example.com",
+		PasswordHash: hash,
+		Tier:         models.TierFree,
+		IsActive:     true,
+	})
+
+	app := setupAuthAppWithPassword(db, id.String())
+
+	resp, err := patchJSON(app, "/me/password", map[string]string{
+		"current_password": "wrongpassword",
+		"new_password":     "newpassword456",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, fiber.StatusUnprocessableEntity, resp.StatusCode)
+}
+
+func TestChangePassword_TooShortNewPassword(t *testing.T) {
+	db := setupAuthTestDB(t)
+
+	id := uuid.New()
+	hash, _ := utils.HashPassword("currentpass")
+	db.Create(&models.User{
+		Base:         models.Base{ID: id},
+		Name:         "User",
+		Email:        "pw3@example.com",
+		PasswordHash: hash,
+		Tier:         models.TierFree,
+		IsActive:     true,
+	})
+
+	app := setupAuthAppWithPassword(db, id.String())
+
+	resp, err := patchJSON(app, "/me/password", map[string]string{
+		"current_password": "currentpass",
+		"new_password":     "short",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, fiber.StatusBadRequest, resp.StatusCode)
+}
+
+func TestChangePassword_NotAuthenticated(t *testing.T) {
+	db := setupAuthTestDB(t)
+	app := setupAuthAppWithPassword(db, "")
+
+	resp, err := patchJSON(app, "/me/password", map[string]string{
+		"current_password": "any",
+		"new_password":     "newpassword456",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, fiber.StatusUnauthorized, resp.StatusCode)
+}
+
+func TestChangePassword_MissingFields(t *testing.T) {
+	db := setupAuthTestDB(t)
+	id := uuid.New()
+	hash, _ := utils.HashPassword("pass")
+	db.Create(&models.User{
+		Base:         models.Base{ID: id},
+		Name:         "User",
+		Email:        "pw4@example.com",
+		PasswordHash: hash,
+		Tier:         models.TierFree,
+		IsActive:     true,
+	})
+
+	app := setupAuthAppWithPassword(db, id.String())
+
+	resp, err := patchJSON(app, "/me/password", map[string]string{
+		"current_password": "pass",
+		// new_password missing
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, fiber.StatusBadRequest, resp.StatusCode)
+}

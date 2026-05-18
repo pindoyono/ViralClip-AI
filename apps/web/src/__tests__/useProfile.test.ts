@@ -19,7 +19,7 @@ jest.mock("@/lib/store", () => ({
 }));
 
 import { apiClient } from "@/lib/api";
-import { useProfile, useUpdateProfile } from "@/hooks/useProfile";
+import { useProfile, useUpdateProfile, useChangePassword } from "@/hooks/useProfile";
 import type { User } from "@/types";
 
 function createWrapper() {
@@ -107,5 +107,38 @@ describe("useUpdateProfile", () => {
     });
 
     await waitFor(() => expect(result.current.data?.avatar_url).toBe("https://example.com/new.jpg"));
+  });
+});
+
+describe("useChangePassword", () => {
+  afterEach(() => jest.clearAllMocks());
+
+  it("patches /auth/me/password with correct payload", async () => {
+    (apiClient.patch as jest.Mock).mockResolvedValueOnce({ data: { message: "Password updated successfully" } });
+
+    const { result } = renderHook(() => useChangePassword(), { wrapper: createWrapper() });
+
+    await act(async () => {
+      result.current.mutate({ current_password: "old123456", new_password: "new123456" });
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(apiClient.patch).toHaveBeenCalledWith("/auth/me/password", {
+      current_password: "old123456",
+      new_password: "new123456",
+    });
+  });
+
+  it("surfaces an error when the API rejects", async () => {
+    (apiClient.patch as jest.Mock).mockRejectedValueOnce(new Error("Current password is incorrect"));
+
+    const { result } = renderHook(() => useChangePassword(), { wrapper: createWrapper() });
+
+    await act(async () => {
+      result.current.mutate({ current_password: "wrongpass", new_password: "new123456" });
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect((result.current.error as Error)?.message).toBe("Current password is incorrect");
   });
 });

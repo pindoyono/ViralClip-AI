@@ -264,3 +264,50 @@ func (h *AuthHandler) UpdateProfile(c *fiber.Ctx) error {
 		LastLoginAt:     user.LastLoginAt,
 	})
 }
+
+// ChangePassword updates the current user's password.
+func (h *AuthHandler) ChangePassword(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		return utils.Unauthorized(c, "Not authenticated")
+	}
+
+	var req dto.ChangePasswordRequest
+	if err := c.BodyParser(&req); err != nil {
+		return utils.BadRequest(c, "Invalid request body")
+	}
+	if req.CurrentPassword == "" || req.NewPassword == "" {
+		return utils.BadRequest(c, "current_password and new_password are required")
+	}
+	if len(req.NewPassword) < 8 {
+		return utils.BadRequest(c, "New password must be at least 8 characters")
+	}
+
+	var user models.User
+	if err := h.db.First(&user, "id = ?", userID).Error; err != nil {
+		return utils.NotFound(c, "User not found")
+	}
+
+	if !utils.CheckPasswordHash(req.CurrentPassword, user.PasswordHash) {
+		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "invalid_password",
+				"message": "Current password is incorrect",
+			},
+		})
+	}
+
+	newHash, err := utils.HashPassword(req.NewPassword)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to hash new password")
+		return utils.InternalError(c, "Failed to update password")
+	}
+
+	if err := h.db.Model(&user).Update("password_hash", newHash).Error; err != nil {
+		log.Error().Err(err).Msg("Failed to save new password")
+		return utils.InternalError(c, "Failed to update password")
+	}
+
+	return utils.SuccessMessage(c, "Password updated successfully")
+}

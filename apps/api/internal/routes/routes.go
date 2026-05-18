@@ -51,6 +51,7 @@ func Register(srv *server.Server) {
 	socialHandler := handlers.NewSocialHandler(srv.DB)
 	analyticsHandler := handlers.NewAnalyticsHandler(srv.DB)
 	trendingHandler := handlers.NewTrendingHandler(srv.DB)
+	contentProfileHandler := handlers.NewContentProfileHandler(srv.DB)
 
 	// Health check
 	app.Get("/health", func(c *fiber.Ctx) error {
@@ -83,6 +84,7 @@ func Register(srv *server.Server) {
 	auth.Post("/logout", authHandler.Logout)
 	auth.Get("/me", authHandler.Me)
 	auth.Patch("/me", authHandler.UpdateProfile)
+	auth.Patch("/me/password", authHandler.ChangePassword)
 
 	// Video routes
 	videos := v1.Group("/videos")
@@ -118,6 +120,13 @@ func Register(srv *server.Server) {
 	// Trending topics routes
 	trending := v1.Group("/trending")
 	trending.Get("/", trendingHandler.List)
+
+	// Content Profile routes
+	contentProfiles := v1.Group("/content-profiles")
+	contentProfiles.Get("/", contentProfileHandler.List)
+	contentProfiles.Post("/", contentProfileHandler.Create)
+	contentProfiles.Patch("/:id", contentProfileHandler.Update)
+	contentProfiles.Delete("/:id", contentProfileHandler.Delete)
 
 	// Catch-all 404
 	app.Use(func(c *fiber.Ctx) error {

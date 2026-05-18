@@ -8,6 +8,11 @@ interface UpdateProfilePayload {
   avatar_url?: string;
 }
 
+interface ChangePasswordPayload {
+  current_password: string;
+  new_password: string;
+}
+
 export function useProfile() {
   return useQuery({
     queryKey: ["profile"],
@@ -34,5 +39,12 @@ export function useUpdateProfile() {
         setAuth(updatedUser, token);
       }
     },
+  });
+}
+
+export function useChangePassword() {
+  return useMutation({
+    mutationFn: (payload: ChangePasswordPayload) =>
+      apiClient.patch("/auth/me/password", payload),
   });
 }
