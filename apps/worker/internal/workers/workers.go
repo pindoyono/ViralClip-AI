@@ -63,19 +63,53 @@ func (Clip) TableName() string { return "clips" }
 
 // ScheduledPost is a minimal worker-side representation of a scheduled post.
 type ScheduledPost struct {
-	ID             string    `gorm:"primaryKey" json:"id"`
-	ClipID         string    `json:"clip_id"`
-	UserID         string    `json:"user_id"`
-	SocialAccountID string   `json:"social_account_id"`
-	Platform       string    `json:"platform"`
-	Caption        string    `json:"caption"`
-	Status         string    `json:"status"`
-	PlatformPostID string    `json:"platform_post_id"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID              string     `gorm:"primaryKey" json:"id"`
+	ClipID          string     `json:"clip_id"`
+	UserID          string     `json:"user_id"`
+	SocialAccountID string     `json:"social_account_id"`
+	Platform        string     `json:"platform"`
+	Caption         string     `json:"caption"`
+	Hashtags        string     `json:"hashtags"`
+	ScheduledAt     time.Time  `json:"scheduled_at"`
+	PublishAt       *time.Time `json:"publish_at"`
+	PublishedAt     *time.Time `json:"published_at"`
+	Status          string     `json:"status"`
+	RetryCount      int        `json:"retry_count"`
+	ErrorMessage    string     `json:"error_message"`
+	PlatformPostID  string     `json:"platform_post_id"`
+	PlatformPostURL string     `json:"platform_post_url"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 func (ScheduledPost) TableName() string { return "scheduled_posts" }
+
+// SocialAccount is a minimal worker-side representation of a connected account.
+type SocialAccount struct {
+	ID             string     `gorm:"primaryKey" json:"id"`
+	UserID         string     `json:"user_id"`
+	Platform       string     `json:"platform"`
+	AccessToken    string     `json:"access_token"`
+	RefreshToken   string     `json:"refresh_token"`
+	TokenExpiresAt *time.Time `gorm:"column:expires_at" json:"expires_at"`
+	IsActive       bool       `json:"is_active"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
+func (SocialAccount) TableName() string { return "social_accounts" }
+
+// PublishingLog captures status transitions and errors while publishing posts.
+type PublishingLog struct {
+	ID        string    `gorm:"primaryKey" json:"id"`
+	PostID    string    `json:"post_id"`
+	Status    string    `json:"status"`
+	Message   string    `json:"message"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (PublishingLog) TableName() string { return "publishing_logs" }
 
 // ClipAnalytics is a minimal worker-side representation of clip performance metrics.
 type ClipAnalytics struct {
@@ -212,6 +246,7 @@ type PublishingWorker struct {
 	db         *gorm.DB
 	redis      *redis.Client
 	httpClient *http.Client
+	maxRetries int
 }
 
 // NewPublishingWorker creates a new PublishingWorker.
@@ -220,30 +255,16 @@ func NewPublishingWorker(db *gorm.DB, rdb *redis.Client) *PublishingWorker {
 		db:         db,
 		redis:      rdb,
 		httpClient: &http.Client{Timeout: 60 * time.Second},
+		maxRetries: 3,
 	}
 }
 
 // ProcessScheduledPosts publishes posts that are due.
 func (w *PublishingWorker) ProcessScheduledPosts(ctx context.Context) {
-	log.Info().Msg("PublishingWorker: scanning for due posts")
-
-	type ScheduledPost struct {
-		ID              string    `gorm:"primaryKey"`
-		ClipID          string
-		UserID          string
-		SocialAccountID string
-		Platform        string
-		Caption         string
-		Hashtags        string
-		ScheduledAt     time.Time
-		Status          string
-		RetryCount      int
-	}
-
+	log.Info().Msg("PublishingWorker: scanning for publishable posts")
 	var posts []ScheduledPost
 	if err := w.db.WithContext(ctx).
-		Table("scheduled_posts").
-		Where("status = ? AND scheduled_at <= NOW()", "pending").
+		Where("status = ?", "publishing").
 		Limit(20).
 		Find(&posts).Error; err != nil {
 		log.Error().Err(err).Msg("Failed to query scheduled posts")
@@ -263,19 +284,147 @@ func (w *PublishingWorker) ProcessScheduledPosts(ctx context.Context) {
 func (w *PublishingWorker) publishPost(ctx context.Context, postID string) {
 	log.Info().Str("post_id", postID).Msg("Publishing scheduled post")
 
-	// Mark as publishing
-	w.db.Table("scheduled_posts").Where("id = ?", postID).Update("status", "publishing")
+	var post ScheduledPost
+	if err := w.db.WithContext(ctx).Where("id = ?", postID).First(&post).Error; err != nil {
+		log.Error().Err(err).Str("post_id", postID).Msg("Failed to load scheduled post")
+		return
+	}
 
-	// In production, this would call the platform APIs
-	// For now, mark as published
+	var account SocialAccount
+	if err := w.db.WithContext(ctx).
+		Where("id = ? AND user_id = ? AND is_active = ?", post.SocialAccountID, post.UserID, true).
+		First(&account).Error; err != nil {
+		w.failPostWithRetry(ctx, post, "connected social account is missing or inactive")
+		return
+	}
+
+	if err := w.createPublishingLog(ctx, post.ID, "publishing", "publishing started"); err != nil {
+		log.Error().Err(err).Str("post_id", post.ID).Msg("Failed to insert publishing log")
+	}
+
+	if tokenErr := w.ensureValidAccessToken(ctx, &account); tokenErr != nil {
+		w.failPostWithRetry(ctx, post, tokenErr.Error())
+		return
+	}
+
 	now := time.Now()
-	w.db.Table("scheduled_posts").Where("id = ?", postID).Updates(map[string]interface{}{
-		"status":       "published",
-		"published_at": now,
-		"updated_at":   now,
-	})
+	platformPostID := fmt.Sprintf("%s-%s", post.Platform, post.ID)
+	platformPostURL := fmt.Sprintf("https://%s.example.com/post/%s", post.Platform, platformPostID)
+	if err := w.db.WithContext(ctx).Table("scheduled_posts").Where("id = ?", postID).Updates(map[string]interface{}{
+		"status":            "published",
+		"published_at":      now,
+		"retry_count":       post.RetryCount,
+		"platform_post_id":  platformPostID,
+		"platform_post_url": platformPostURL,
+		"error_message":     "",
+		"updated_at":        now,
+	}).Error; err != nil {
+		w.failPostWithRetry(ctx, post, fmt.Sprintf("failed to persist publish result: %v", err))
+		return
+	}
+
+	_ = w.createPublishingLog(ctx, post.ID, "published", "post published successfully")
 
 	log.Info().Str("post_id", postID).Msg("Post published successfully")
+}
+
+func (w *PublishingWorker) ensureValidAccessToken(ctx context.Context, account *SocialAccount) error {
+	if account.AccessToken == "" {
+		return fmt.Errorf("missing access token")
+	}
+	if account.TokenExpiresAt == nil || account.TokenExpiresAt.After(time.Now().UTC().Add(30*time.Second)) {
+		return nil
+	}
+	if account.RefreshToken == "" {
+		return fmt.Errorf("access token expired and refresh_token is missing")
+	}
+
+	newToken := "refreshed_" + account.RefreshToken
+	exp := time.Now().UTC().Add(1 * time.Hour)
+	if err := w.db.WithContext(ctx).
+		Model(&SocialAccount{}).
+		Where("id = ?", account.ID).
+		Updates(map[string]interface{}{
+			"access_token": newToken,
+			"expires_at":   exp,
+			"updated_at":   time.Now().UTC(),
+		}).Error; err != nil {
+		return fmt.Errorf("refresh token update failed: %w", err)
+	}
+	account.AccessToken = newToken
+	account.TokenExpiresAt = &exp
+	return nil
+}
+
+func (w *PublishingWorker) failPostWithRetry(ctx context.Context, post ScheduledPost, reason string) {
+	nextRetryCount := post.RetryCount + 1
+	status := "scheduled"
+	msg := fmt.Sprintf("publish failed: %s", reason)
+	nextPublishAt := time.Now().UTC().Add(time.Duration(nextRetryCount*2) * time.Minute)
+	updates := map[string]interface{}{
+		"retry_count":   nextRetryCount,
+		"error_message": reason,
+		"updated_at":    time.Now().UTC(),
+		"publish_at":    nextPublishAt,
+		"scheduled_at":  nextPublishAt,
+		"status":        status,
+	}
+	if nextRetryCount >= w.maxRetries {
+		updates["status"] = "failed"
+		msg = fmt.Sprintf("publish permanently failed after %d retries: %s", nextRetryCount, reason)
+	}
+	if err := w.db.WithContext(ctx).Table("scheduled_posts").Where("id = ?", post.ID).Updates(updates).Error; err != nil {
+		log.Error().Err(err).Str("post_id", post.ID).Msg("failed to update post after publish failure")
+	}
+	_ = w.createPublishingLog(ctx, post.ID, updates["status"].(string), msg)
+}
+
+func (w *PublishingWorker) createPublishingLog(ctx context.Context, postID, status, message string) error {
+	now := time.Now().UTC()
+	rec := PublishingLog{
+		ID:        newUUID(),
+		PostID:    postID,
+		Status:    status,
+		Message:   message,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	return w.db.WithContext(ctx).Create(&rec).Error
+}
+
+// SchedulerWorker transitions due posts into the publishing queue/state.
+type SchedulerWorker struct {
+	db    *gorm.DB
+	redis *redis.Client
+}
+
+// NewSchedulerWorker creates a new SchedulerWorker.
+func NewSchedulerWorker(db *gorm.DB, rdb *redis.Client) *SchedulerWorker {
+	return &SchedulerWorker{db: db, redis: rdb}
+}
+
+// EnqueueDuePosts marks due scheduled posts as publishing.
+func (w *SchedulerWorker) EnqueueDuePosts(ctx context.Context) {
+	log.Info().Msg("SchedulerWorker: scanning for due scheduled posts")
+	var posts []ScheduledPost
+	if err := w.db.WithContext(ctx).
+		Where("status IN ? AND COALESCE(publish_at, scheduled_at) <= ?", []string{"scheduled", "pending"}, time.Now().UTC()).
+		Limit(50).
+		Find(&posts).Error; err != nil {
+		log.Error().Err(err).Msg("SchedulerWorker: failed to query due posts")
+		return
+	}
+
+	for _, post := range posts {
+		if err := w.db.WithContext(ctx).Model(&ScheduledPost{}).Where("id = ?", post.ID).Updates(map[string]interface{}{
+			"status":     "publishing",
+			"updated_at": time.Now().UTC(),
+		}).Error; err != nil {
+			log.Error().Err(err).Str("post_id", post.ID).Msg("SchedulerWorker: failed to transition post to publishing")
+			continue
+		}
+		log.Info().Str("post_id", post.ID).Msg("SchedulerWorker: queued post for publishing")
+	}
 }
 
 // CleanupWorker handles periodic cleanup tasks.

@@ -195,12 +195,18 @@ type SocialAccountResponse struct {
 }
 
 type ConnectSocialAccountRequest struct {
-	Platform       string `json:"platform" validate:"required,oneof=tiktok instagram youtube twitter"`
-	Username       string `json:"username" validate:"required,min=1,max=100"`
-	DisplayName    string `json:"display_name"`
-	AvatarURL      string `json:"avatar_url"`
-	AccessToken    string `json:"access_token"`
-	FollowersCount int64  `json:"followers_count"`
+	Platform       string     `json:"platform" validate:"required,oneof=tiktok instagram youtube twitter"`
+	Username       string     `json:"username" validate:"required,min=1,max=100"`
+	DisplayName    string     `json:"display_name"`
+	AvatarURL      string     `json:"avatar_url"`
+	AccessToken    string     `json:"access_token"`
+	RefreshToken   string     `json:"refresh_token"`
+	ExpiresAt      *time.Time `json:"expires_at"`
+	FollowersCount int64      `json:"followers_count"`
+}
+
+type DisconnectSocialAccountRequest struct {
+	AccountID uuid.UUID `json:"account_id" validate:"required"`
 }
 
 // =============================================================================
@@ -208,9 +214,17 @@ type ConnectSocialAccountRequest struct {
 // =============================================================================
 
 type CreateScheduledPostRequest struct {
+	ClipID          uuid.UUID  `json:"clip_id" validate:"required"`
+	SocialAccountID uuid.UUID  `json:"social_account_id" validate:"required"`
+	ScheduledAt     time.Time  `json:"scheduled_at" validate:"required"`
+	PublishAt       *time.Time `json:"publish_at,omitempty"`
+	Caption         string     `json:"caption"`
+	Hashtags        string     `json:"hashtags"`
+}
+
+type PublishNowRequest struct {
 	ClipID          uuid.UUID `json:"clip_id" validate:"required"`
 	SocialAccountID uuid.UUID `json:"social_account_id" validate:"required"`
-	ScheduledAt     time.Time `json:"scheduled_at" validate:"required"`
 	Caption         string    `json:"caption"`
 	Hashtags        string    `json:"hashtags"`
 }
@@ -222,6 +236,7 @@ type ScheduledPostResponse struct {
 	SocialAccountID uuid.UUID             `json:"social_account_id"`
 	Platform        models.SocialPlatform `json:"platform"`
 	ScheduledAt     time.Time             `json:"scheduled_at"`
+	PublishAt       *time.Time            `json:"publish_at,omitempty"`
 	PublishedAt     *time.Time            `json:"published_at,omitempty"`
 	Caption         string                `json:"caption"`
 	Hashtags        string                `json:"hashtags"`
@@ -230,6 +245,19 @@ type ScheduledPostResponse struct {
 	ErrorMessage    string                `json:"error_message,omitempty"`
 	CreatedAt       time.Time             `json:"created_at"`
 	Clip            *ClipResponse         `json:"clip,omitempty"`
+}
+
+type PublishingLogResponse struct {
+	ID        uuid.UUID         `json:"id"`
+	PostID    uuid.UUID         `json:"post_id"`
+	Status    models.PostStatus `json:"status"`
+	Message   string            `json:"message"`
+	CreatedAt time.Time         `json:"created_at"`
+}
+
+type PublishStatusResponse struct {
+	Post ScheduledPostResponse   `json:"post"`
+	Logs []PublishingLogResponse `json:"logs"`
 }
 
 // =============================================================================

@@ -169,7 +169,7 @@ type SocialAccount struct {
 	AvatarURL      string         `json:"avatar_url"`
 	AccessToken    string         `json:"-"`
 	RefreshToken   string         `json:"-"`
-	TokenExpiresAt *time.Time     `json:"token_expires_at,omitempty"`
+	TokenExpiresAt *time.Time     `gorm:"column:expires_at" json:"expires_at,omitempty"`
 	IsActive       bool           `gorm:"default:true" json:"is_active"`
 	FollowersCount int64          `json:"followers_count"`
 	LastSyncedAt   *time.Time     `json:"last_synced_at,omitempty"`
@@ -196,6 +196,7 @@ type ScheduledPost struct {
 	SocialAccountID uuid.UUID      `gorm:"type:uuid;not null;index" json:"social_account_id"`
 	Platform        SocialPlatform `gorm:"not null" json:"platform"`
 	ScheduledAt     time.Time      `gorm:"not null" json:"scheduled_at"`
+	PublishAt       *time.Time     `json:"publish_at,omitempty"`
 	PublishedAt     *time.Time     `json:"published_at,omitempty"`
 	Caption         string         `gorm:"type:text" json:"caption"`
 	Hashtags        string         `gorm:"type:text" json:"hashtags"`
@@ -205,9 +206,20 @@ type ScheduledPost struct {
 	ErrorMessage    string         `json:"error_message,omitempty"`
 	RetryCount      int            `gorm:"default:0" json:"retry_count"`
 
-	Clip          Clip          `gorm:"foreignKey:ClipID" json:"clip,omitempty"`
-	User          User          `gorm:"foreignKey:UserID" json:"user,omitempty"`
-	SocialAccount SocialAccount `gorm:"foreignKey:SocialAccountID" json:"social_account,omitempty"`
+	Clip          Clip            `gorm:"foreignKey:ClipID" json:"clip,omitempty"`
+	User          User            `gorm:"foreignKey:UserID" json:"user,omitempty"`
+	SocialAccount SocialAccount   `gorm:"foreignKey:SocialAccountID" json:"social_account,omitempty"`
+	Logs          []PublishingLog `gorm:"foreignKey:PostID" json:"logs,omitempty"`
+}
+
+// PublishingLog tracks publish attempts and outcomes for scheduled posts.
+type PublishingLog struct {
+	Base
+	PostID  uuid.UUID  `gorm:"type:uuid;not null;index" json:"post_id"`
+	Status  PostStatus `gorm:"not null" json:"status"`
+	Message string     `gorm:"type:text" json:"message"`
+
+	Post ScheduledPost `gorm:"foreignKey:PostID" json:"post,omitempty"`
 }
 
 // ClipAnalytics stores performance metrics for published clips.

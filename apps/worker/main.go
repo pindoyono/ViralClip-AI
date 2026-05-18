@@ -62,6 +62,7 @@ func main() {
 	analyticsQueueWorker := workers.NewQueueAnalyticsWorker(db, queueCli, cfg.Worker.MaxRetries)
 
 	// Time-based workers retained for their specific scheduling needs.
+	schedulerWorker := workers.NewSchedulerWorker(db, rdb)
 	publishingWorker := workers.NewPublishingWorker(db, rdb)
 	cleanupWorker := workers.NewCleanupWorker(db, rdb)
 	analyticsWorker := workers.NewAnalyticsWorker(db, rdb)
@@ -96,6 +97,22 @@ func main() {
 	startQueueWorker("analytics_queue", analyticsQueueWorker.Start)
 
 	// --- Time-based worker goroutines ---
+
+	// Scheduler loop (every 30 seconds)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				schedulerWorker.EnqueueDuePosts(ctx)
+			}
+		}
+	}()
 
 	// Publishing loop (every minute)
 	wg.Add(1)

@@ -504,16 +504,51 @@ curl -X POST http://localhost:8080/api/v1/clips/clip-uuid/metadata/enhance \
 
 ## Social & Scheduling
 
-### List Connected Accounts
+### Connect Social Account (OAuth/token payload)
 
 ```
-GET /social/accounts
+POST /social/connect
 Authorization: Bearer <token>
+```
+
+**Request body:**
+```json
+{
+  "platform": "tiktok",
+  "username": "creator_handle",
+  "access_token": "token",
+  "refresh_token": "refresh_token",
+  "expires_at": "2026-05-18T22:00:00Z"
+}
 ```
 
 **curl example:**
 ```bash
-curl http://localhost:8080/api/v1/social/accounts \
+curl -X POST http://localhost:8080/api/v1/social/connect \
+  -H "Authorization: Bearer eyJhbGci..." \
+  -H "Content-Type: application/json" \
+  -d '{"platform":"tiktok","username":"creator_handle","access_token":"token","refresh_token":"refresh_token"}'
+```
+
+---
+
+### Disconnect Social Account
+
+```
+POST /social/disconnect
+Authorization: Bearer <token>
+```
+
+**Request body:**
+```json
+{
+  "account_id": "account-uuid"
+}
+```
+
+**curl example:**
+```bash
+curl -X POST http://localhost:8080/api/v1/social/disconnect \
   -H "Authorization: Bearer eyJhbGci..."
 ```
 
@@ -522,7 +557,7 @@ curl http://localhost:8080/api/v1/social/accounts \
 ### Schedule a Post
 
 ```
-POST /social/schedule
+POST /schedule
 Authorization: Bearer <token>
 ```
 
@@ -532,6 +567,7 @@ Authorization: Bearer <token>
   "clip_id": "clip-uuid",
   "social_account_id": "account-uuid",
   "scheduled_at": "2024-01-20T18:00:00Z",
+  "publish_at": "2024-01-20T18:00:00Z",
   "caption": "Check out this amazing moment! 🔥",
   "hashtags": "#viral #trending"
 }
@@ -539,41 +575,58 @@ Authorization: Bearer <token>
 
 **curl example:**
 ```bash
-curl -X POST http://localhost:8080/api/v1/social/schedule \
+curl -X POST http://localhost:8080/api/v1/schedule \
   -H "Authorization: Bearer eyJhbGci..." \
   -H "Content-Type: application/json" \
-  -d '{"clip_id":"clip-uuid","social_account_id":"acc-uuid","scheduled_at":"2024-01-20T18:00:00Z","caption":"Amazing clip!"}'
+  -d '{"clip_id":"clip-uuid","social_account_id":"acc-uuid","scheduled_at":"2024-01-20T18:00:00Z","publish_at":"2024-01-20T18:00:00Z","caption":"Amazing clip!"}'
 ```
 
 ---
 
-### List Scheduled Posts
+### Publish Now
 
 ```
-GET /social/schedule
+POST /publish
+Authorization: Bearer <token>
+```
+
+**Request body:**
+```json
+{
+  "clip_id": "clip-uuid",
+  "social_account_id": "account-uuid",
+  "caption": "Publish immediately",
+  "hashtags": "#viral"
+}
+```
+
+**curl example:**
+```bash
+curl -X POST http://localhost:8080/api/v1/publish \
+  -H "Authorization: Bearer eyJhbGci..." \
+  -H "Content-Type: application/json" \
+  -d '{"clip_id":"clip-uuid","social_account_id":"acc-uuid","caption":"Publish now"}'
+```
+
+---
+
+### Publish Status
+
+```
+GET /publish/status?post_id=<post-uuid>
 Authorization: Bearer <token>
 ```
 
 **curl example:**
 ```bash
-curl http://localhost:8080/api/v1/social/schedule \
+curl http://localhost:8080/api/v1/publish/status?post_id=post-uuid \
   -H "Authorization: Bearer eyJhbGci..."
 ```
 
----
-
-### Cancel Scheduled Post
-
-```
-DELETE /social/schedule/:id
-Authorization: Bearer <token>
-```
-
-**curl example:**
-```bash
-curl -X DELETE http://localhost:8080/api/v1/social/schedule/post-uuid \
-  -H "Authorization: Bearer eyJhbGci..."
-```
+`PublishStatus` returns:
+- current post status (`scheduled`, `publishing`, `published`, `failed`, `cancelled`)
+- retry count and last error message
+- ordered publish attempt logs from `publishing_logs`
 
 ---
 

@@ -142,9 +142,14 @@ func Register(srv *server.Server) {
 	social.Get("/accounts", socialHandler.ListAccounts)
 	social.Post("/accounts", socialHandler.ConnectAccount)
 	social.Delete("/accounts/:id", socialHandler.DisconnectAccount)
+	social.Post("/connect", socialHandler.Connect)
+	social.Post("/disconnect", socialHandler.Disconnect)
 	social.Post("/schedule", socialHandler.SchedulePost)
 	social.Get("/schedule", socialHandler.ListScheduledPosts)
 	social.Delete("/schedule/:id", socialHandler.CancelScheduledPost)
+	v1.Post("/schedule", socialHandler.Schedule)
+	v1.Post("/publish", socialHandler.Publish)
+	v1.Get("/publish/status", socialHandler.PublishStatus)
 
 	// Analytics routes
 	analytics := v1.Group("/analytics")
