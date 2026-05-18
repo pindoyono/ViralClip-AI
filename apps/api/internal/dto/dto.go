@@ -621,3 +621,26 @@ type RecommendationResponse struct {
 	Insight     string  `json:"insight"`
 	Confidence  float64 `json:"confidence"`
 }
+
+// =============================================================================
+// Resumable Upload DTOs (Task 5)
+// =============================================================================
+
+// UploadProgressResponse is returned by GET /api/v1/videos/:id/upload-progress.
+// It also matches the shape pushed over WebSocket:
+//
+//	{"progress": 67, "status": "uploading"}
+type UploadProgressResponse struct {
+	// UploadID is the identifier used to track this upload session.
+	UploadID string `json:"upload_id"`
+	// Progress is the percentage of bytes uploaded (0–100).
+	Progress int `json:"progress"`
+	// Status is the current upload state: "uploading", "completed", or "failed".
+	Status string `json:"status"`
+	// UploadedBytes is the number of bytes confirmed received by the storage backend.
+	UploadedBytes int64 `json:"uploaded_bytes"`
+	// TotalBytes is the expected total file size in bytes.
+	TotalBytes int64 `json:"total_bytes"`
+	// Error contains a description when Status is "failed".
+	Error string `json:"error,omitempty"`
+}

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/models"
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/storage"
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/utils"
+	"github.com/pindoyono/viralclip-ai/apps/api/internal/websocket"
 )
 
 // VideoHandler handles video-related requests.
@@ -24,18 +26,27 @@ type VideoHandler struct {
 	db             *gorm.DB
 	storageService storage.StorageService
 	publisher      apiqueue.VideoPublisher
+	hub            *websocket.Hub
 }
 
 // NewVideoHandler creates a new VideoHandler.
 // publisher may be nil; when nil, jobs will not be enqueued and a warning is
 // logged instead. This allows the handler to work in environments where Redis
 // is unavailable (e.g. unit tests that do not exercise queue publishing).
+// hub may be nil; when nil, WebSocket progress broadcasts are skipped.
 func NewVideoHandler(db *gorm.DB, storageService storage.StorageService, publisher ...apiqueue.VideoPublisher) *VideoHandler {
 	var pub apiqueue.VideoPublisher
 	if len(publisher) > 0 {
 		pub = publisher[0]
 	}
 	return &VideoHandler{db: db, storageService: storageService, publisher: pub}
+}
+
+// WithHub attaches a WebSocket hub to this handler so that upload progress
+// events are broadcast to the uploading user in real-time.
+func (h *VideoHandler) WithHub(hub *websocket.Hub) *VideoHandler {
+	h.hub = hub
+	return h
 }
 
 // Upload handles video file upload.
@@ -87,6 +98,16 @@ func (h *VideoHandler) Upload(c *fiber.Ctx) error {
 		Filename:    file.Filename,
 		FileSize:    file.Size,
 		UploadID:    videoID.String(),
+	}
+
+	// If the storage backend supports resumable uploads and a WebSocket hub is
+	// available, broadcast progress updates to the uploading user in real-time.
+	if h.hub != nil {
+		if resumableSvc, ok := h.storageService.(storage.ResumableStorageService); ok {
+			ctx, cancelBroadcast := context.WithCancel(c.Context())
+			go h.broadcastUploadProgress(ctx, resumableSvc, videoID.String(), userID)
+			defer cancelBroadcast()
+		}
 	}
 
 	fileInfo, err := h.storageService.Upload(c.Context(), key, src, opts)
@@ -337,5 +358,117 @@ func (h *VideoHandler) enqueueTranscript(ctx context.Context, videoID, userID, s
 		// Log but do not fail the HTTP request – the video record is persisted
 		// and can be re-triggered via POST /videos/:id/process.
 		log.Error().Err(err).Str("video_id", videoID).Msg("Failed to enqueue transcript job")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/videos/:id/upload-progress
+// ---------------------------------------------------------------------------
+
+// GetUploadProgress returns the current progress of the storage upload for the
+// given video ID. The video ID doubles as the upload tracking ID that was set
+// in UploadOptions.UploadID during the Upload call.
+//
+// When the storage backend does not support resumable uploads (e.g. local
+// storage), the endpoint returns 204 No Content.
+//
+// Response body (when available):
+//
+//	{"upload_id":"…","progress":67,"status":"uploading","uploaded_bytes":…,"total_bytes":…}
+func (h *VideoHandler) GetUploadProgress(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		return utils.Unauthorized(c, "Not authenticated")
+	}
+
+	videoID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return utils.BadRequest(c, "Invalid video ID")
+	}
+
+	// Verify the video belongs to the requesting user.
+	var video models.Video
+	if err := h.db.Where("id = ? AND user_id = ?", videoID, userID).First(&video).Error; err != nil {
+		return utils.NotFound(c, "Video not found")
+	}
+
+	// Type-assert to ResumableStorageService; return 204 for non-resumable backends.
+	resumableSvc, ok := h.storageService.(storage.ResumableStorageService)
+	if !ok {
+		return c.SendStatus(fiber.StatusNoContent)
+	}
+
+	progress, found := resumableSvc.GetUploadProgress(videoID.String())
+	if !found {
+		// Upload tracking entry has already been cleaned up or never existed
+		// (e.g. the upload used the simple path). Return 204.
+		return c.SendStatus(fiber.StatusNoContent)
+	}
+
+	resp := toUploadProgressResponse(videoID.String(), progress)
+	return utils.Success(c, resp)
+}
+
+// toUploadProgressResponse converts a storage.UploadProgress to the API DTO.
+func toUploadProgressResponse(uploadID string, p storage.UploadProgress) dto.UploadProgressResponse {
+	pct := 0
+	if p.TotalBytes > 0 {
+		pct = int(p.UploadedBytes * 100 / p.TotalBytes)
+		if pct > 100 {
+			pct = 100
+		}
+	} else if p.Status == storage.UploadStatusCompleted {
+		pct = 100
+	}
+
+	return dto.UploadProgressResponse{
+		UploadID:      uploadID,
+		Progress:      pct,
+		Status:        string(p.Status),
+		UploadedBytes: p.UploadedBytes,
+		TotalBytes:    p.TotalBytes,
+		Error:         p.Error,
+	}
+}
+
+// broadcastUploadProgress periodically reads upload progress from the tracker
+// and sends WebSocket messages to the uploading user until ctx is cancelled or
+// the upload finishes.
+//
+// Message format: {"type":"upload_progress","video_id":"…","payload":{"progress":67,"status":"uploading"}}
+func (h *VideoHandler) broadcastUploadProgress(ctx context.Context, svc storage.ResumableStorageService, uploadID, userID string) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			progress, found := svc.GetUploadProgress(uploadID)
+			if !found {
+				return
+			}
+
+			resp := toUploadProgressResponse(uploadID, progress)
+			msg := dto.WSMessage{
+				Type:    "upload_progress",
+				VideoID: uploadID,
+				Payload: resp,
+			}
+
+			data, err := json.Marshal(msg)
+			if err != nil {
+				log.Error().Err(err).Str("upload_id", uploadID).Msg("Failed to marshal upload progress WS message")
+				return
+			}
+
+			h.hub.SendToUser(userID, data)
+
+			// Stop broadcasting once the upload has reached a terminal state.
+			if progress.Status == storage.UploadStatusCompleted || progress.Status == storage.UploadStatusFailed {
+				return
+			}
+		}
 	}
 }

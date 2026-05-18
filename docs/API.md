@@ -354,6 +354,102 @@ curl http://localhost:8080/api/v1/videos/vid-uuid/clips \
 
 ---
 
+### Get Upload Progress (Resumable Upload)
+
+Polls the current progress of a resumable (chunked) Google Drive upload for a
+video that was just created via `POST /videos/`. The `id` must match the `id`
+returned by the upload endpoint – it is used as the internal tracking key.
+
+When the storage backend does not support resumable uploads (e.g. local
+storage), this endpoint returns **`204 No Content`** with an empty body.
+
+```
+GET /videos/:id/upload-progress
+Authorization: Bearer <token>
+```
+
+**Response `200` – upload in progress:**
+```json
+{
+  "success": true,
+  "data": {
+    "upload_id": "vid-uuid",
+    "progress": 67,
+    "status": "uploading",
+    "uploaded_bytes": 352321536,
+    "total_bytes": 524288000
+  }
+}
+```
+
+**Response `200` – upload completed:**
+```json
+{
+  "success": true,
+  "data": {
+    "upload_id": "vid-uuid",
+    "progress": 100,
+    "status": "completed",
+    "uploaded_bytes": 524288000,
+    "total_bytes": 524288000
+  }
+}
+```
+
+**Response `200` – upload failed:**
+```json
+{
+  "success": true,
+  "data": {
+    "upload_id": "vid-uuid",
+    "progress": 42,
+    "status": "failed",
+    "uploaded_bytes": 220200960,
+    "total_bytes": 524288000,
+    "error": "chunk upload failed after 5 retries: status 503"
+  }
+}
+```
+
+**Response `204 No Content`** – storage backend does not support resumable uploads, or the tracking entry has already been cleaned up.
+
+**Status values:**
+| Value       | Description                                   |
+|-------------|-----------------------------------------------|
+| `uploading` | Upload is in progress                         |
+| `completed` | Upload finished successfully                  |
+| `failed`    | Upload failed permanently after all retries   |
+
+**WebSocket real-time updates:**
+
+When the Google Drive storage backend is in use **and** the client has an
+active WebSocket connection (see [WebSocket](#websocket)), the server pushes
+progress events approximately every 500 ms during the upload:
+
+```json
+{
+  "type": "upload_progress",
+  "video_id": "vid-uuid",
+  "payload": {
+    "upload_id": "vid-uuid",
+    "progress": 67,
+    "status": "uploading",
+    "uploaded_bytes": 352321536,
+    "total_bytes": 524288000
+  }
+}
+```
+
+The final event has `"status": "completed"` or `"status": "failed"`.
+
+**curl example:**
+```bash
+curl http://localhost:8080/api/v1/videos/vid-uuid/upload-progress \
+  -H "Authorization: Bearer eyJhbGci..."
+```
+
+---
+
 ## Clips
 
 ### List Clips

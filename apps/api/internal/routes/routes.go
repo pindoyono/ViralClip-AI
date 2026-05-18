@@ -48,7 +48,7 @@ func Register(srv *server.Server) {
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(srv.DB, jwtManager)
-	videoHandler := handlers.NewVideoHandler(srv.DB, storageSvc, queuePublisher)
+	videoHandler := handlers.NewVideoHandler(srv.DB, storageSvc, queuePublisher).WithHub(srv.Hub)
 	clipHandler := handlers.NewClipHandler(srv.DB)
 	socialHandler := handlers.NewSocialHandler(srv.DB)
 	analyticsHandler := handlers.NewAnalyticsHandler(srv.DB)
@@ -108,6 +108,7 @@ func Register(srv *server.Server) {
 	videos.Get("/:id", videoHandler.Get)
 	videos.Delete("/:id", videoHandler.Delete)
 	videos.Post("/:id/process", videoHandler.ProcessVideo)
+	videos.Get("/:id/upload-progress", videoHandler.GetUploadProgress)
 	videos.Get("/:videoId/clips", clipHandler.GetByVideo)
 
 	// Hook Detection V2 routes
