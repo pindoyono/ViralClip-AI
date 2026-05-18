@@ -238,3 +238,29 @@ export interface WSMessage {
   video_id?: string;
   payload?: JobStatusResponse;
 }
+
+// =============================================================================
+// Metadata Enhancement
+// =============================================================================
+
+/** Optional body for POST /api/v1/clips/:id/metadata/enhance */
+export interface EnhanceMetadataRequest {
+  /** Target platform for optimised metadata. Defaults to "tiktok". */
+  platform?: "tiktok" | "instagram" | "youtube" | "twitter";
+  /** Optional content niche (e.g. "tech", "fitness"). */
+  niche?: string;
+  /** Optional tone descriptor (e.g. "educational", "humorous"). */
+  tone?: string;
+}
+
+/** Response from POST /api/v1/clips/:id/metadata/enhance */
+export interface MetadataEnhanceResponse {
+  /** Updated clip record with enhanced title, description, and hashtags. */
+  clip: Clip;
+  /** SEO-relevant keywords suggested by the AI. */
+  keywords: string[];
+  /** Primary content category inferred by the AI. */
+  category: string;
+  /** Suggested optimal posting times, e.g. "7:00 PM EST on Weekdays". */
+  optimal_post_times: string[];
+}

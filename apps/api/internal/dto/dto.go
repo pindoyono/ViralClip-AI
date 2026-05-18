@@ -490,3 +490,32 @@ type WSMessage struct {
 	VideoID string      `json:"video_id,omitempty"`
 	Payload interface{} `json:"payload,omitempty"`
 }
+
+// =============================================================================
+// Metadata Enhancement DTOs
+// =============================================================================
+
+// EnhanceMetadataRequest is the optional request body for
+// POST /api/v1/clips/:id/metadata/enhance.
+type EnhanceMetadataRequest struct {
+	// Platform specifies the target social platform for metadata optimisation.
+	// Valid values: tiktok | instagram | youtube | twitter. Defaults to "tiktok".
+	Platform string `json:"platform"`
+	// Niche is an optional content niche descriptor (e.g. "tech", "fitness").
+	Niche string `json:"niche"`
+	// Tone is an optional tone descriptor (e.g. "educational", "humorous").
+	Tone string `json:"tone"`
+}
+
+// MetadataEnhanceResponse is returned after the clip is enhanced.
+// The clip's title, description, and hashtags are updated in the database.
+type MetadataEnhanceResponse struct {
+	// Clip is the updated clip record.
+	Clip ClipResponse `json:"clip"`
+	// Keywords are SEO-relevant keywords suggested by the AI.
+	Keywords []string `json:"keywords"`
+	// Category is the primary content category inferred by the AI.
+	Category string `json:"category"`
+	// OptimalPostTimes contains suggested posting times (e.g. "7:00 PM EST on Weekdays").
+	OptimalPostTimes []string `json:"optimal_post_times"`
+}

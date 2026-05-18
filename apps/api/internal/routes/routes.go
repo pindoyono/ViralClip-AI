@@ -57,6 +57,7 @@ func Register(srv *server.Server) {
 	clipHandlerV2 := handlers.NewClipHandlerV2(srv.DB, srv.Config)
 	subtitleHandler := handlers.NewSubtitleHandler(srv.DB, srv.Config)
 	statusHandler := handlers.NewStatusHandler(srv.DB, srv.Redis, srv.Hub, srv.Config.JWT.Secret)
+	metadataHandler := handlers.NewMetadataHandler(srv.DB, srv.Config)
 
 	// Start the Redis Pub/Sub → WebSocket broadcaster in the background.
 	if srv.Redis != nil {
@@ -129,6 +130,9 @@ func Register(srv *server.Server) {
 	clips.Get("/:id", clipHandler.Get)
 	clips.Patch("/:id", clipHandler.Update)
 	clips.Delete("/:id", clipHandler.Delete)
+
+	// Metadata enhancement route
+	clips.Post("/:id/metadata/enhance", metadataHandler.Enhance)
 
 	// Social media routes
 	social := v1.Group("/social")

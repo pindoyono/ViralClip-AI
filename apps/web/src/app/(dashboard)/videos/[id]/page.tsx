@@ -10,11 +10,14 @@ import { useHookDetections, useDetectHooks } from "@/hooks/useHooksV2";
 import { useGenerateClipsV2 } from "@/hooks/useClipsV2";
 import { useBurnSubtitles } from "@/hooks/useSubtitles";
 import { useJobStatus, useVideoProcessingWS } from "@/hooks/useJobStatus";
+import { useEnhanceMetadata } from "@/hooks/useMetadata";
 import { formatBytes, formatDuration } from "@/lib/utils";
 import type {
   ClipV2ProfileType,
   ClipV2ResultItem,
+  EnhanceMetadataRequest,
   JobStatusResponse,
+  MetadataEnhanceResponse,
   PipelineStageInfo,
   SubtitleStyle,
 } from "@/types";
@@ -187,8 +190,17 @@ export default function VideoDetailPage() {
   const detectHooks = useDetectHooks(id);
   const generateClipsV2 = useGenerateClipsV2(id);
   const burnSubtitles = useBurnSubtitles(id);
+  const enhanceMetadata = useEnhanceMetadata();
   const deleteVideo = useDeleteVideo();
   const processVideo = useProcessVideo();
+
+  // Per-clip enhance state.
+  const [enhancePlatform, setEnhancePlatform] = useState<
+    EnhanceMetadataRequest["platform"]
+  >("tiktok");
+  const [enhanceResults, setEnhanceResults] = useState<
+    Record<string, MetadataEnhanceResponse>
+  >({});
 
   // Job status polling (HTTP fallback).
   const { data: jobStatus } = useJobStatus(
@@ -320,7 +332,28 @@ export default function VideoDetailPage() {
 
       {/* Clips Section */}
       <div className="space-y-3">
-        <h2 className="text-lg font-semibold text-white">Generated Clips</h2>
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <h2 className="text-lg font-semibold text-white">Generated Clips</h2>
+          {clips.length > 0 && (
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-slate-400">Enhance for</label>
+              <select
+                value={enhancePlatform}
+                onChange={(e) =>
+                  setEnhancePlatform(
+                    e.target.value as EnhanceMetadataRequest["platform"]
+                  )
+                }
+                className="bg-slate-700 border border-slate-600 rounded-lg px-2 py-1 text-white text-xs focus:outline-none focus:ring-2 focus:ring-amber-500"
+              >
+                <option value="tiktok">TikTok</option>
+                <option value="instagram">Instagram</option>
+                <option value="youtube">YouTube</option>
+                <option value="twitter">Twitter</option>
+              </select>
+            </div>
+          )}
+        </div>
 
         <div className="bg-slate-800 border border-slate-700 rounded-xl">
           {clipsLoading ? (
@@ -345,52 +378,110 @@ export default function VideoDetailPage() {
                 hook_text?: string;
                 status: string;
                 has_subtitles?: boolean;
-              }>).map((clip) => (
-                <li key={clip.id} className="flex items-center gap-4 px-6 py-4">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-white font-medium truncate">{clip.title}</p>
-                    {clip.hook_text && (
-                      <p className="text-xs text-purple-300 mt-0.5 truncate italic">
-                        &ldquo;{clip.hook_text}&rdquo;
-                      </p>
-                    )}
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      {formatDuration(clip.duration)} · Viral score:{" "}
-                      <span className="text-purple-400 font-medium">
-                        {Math.round(clip.viral_score * 100)}%
-                      </span>
-                    </p>
-                    {clip.hashtags && clip.hashtags.length > 0 && (
-                      <p className="text-xs text-slate-500 mt-1 truncate">
-                        {clip.hashtags.slice(0, 4).join(" ")}
-                      </p>
-                    )}
-                  </div>
+              }>).map((clip) => {
+                const result = enhanceResults[clip.id];
+                const isEnhancing =
+                  enhanceMetadata.isPending &&
+                  enhanceMetadata.variables?.clipId === clip.id;
+                return (
+                  <li key={clip.id} className="px-6 py-4 space-y-2">
+                    <div className="flex items-center gap-4">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white font-medium truncate">{clip.title}</p>
+                        {clip.hook_text && (
+                          <p className="text-xs text-purple-300 mt-0.5 truncate italic">
+                            &ldquo;{clip.hook_text}&rdquo;
+                          </p>
+                        )}
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {formatDuration(clip.duration)} · Viral score:{" "}
+                          <span className="text-purple-400 font-medium">
+                            {Math.round(clip.viral_score * 100)}%
+                          </span>
+                        </p>
+                        {clip.hashtags && clip.hashtags.length > 0 && (
+                          <p className="text-xs text-slate-500 mt-1 truncate">
+                            {clip.hashtags.slice(0, 4).join(" ")}
+                          </p>
+                        )}
+                      </div>
 
-                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                    {clip.has_subtitles && (
-                      <span className="text-xs bg-cyan-600/20 text-cyan-300 px-2 py-0.5 rounded-full font-medium">
-                        CC
-                      </span>
+                      <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                        {clip.has_subtitles && (
+                          <span className="text-xs bg-cyan-600/20 text-cyan-300 px-2 py-0.5 rounded-full font-medium">
+                            CC
+                          </span>
+                        )}
+                        <span
+                          className={`text-xs font-medium px-2 py-0.5 rounded-full capitalize ${
+                            CLIP_STATUS_COLORS[clip.status] ?? "text-slate-400"
+                          }`}
+                        >
+                          {clip.status}
+                        </span>
+                        {clip.status === "ready" && (
+                          <Link
+                            href={`/schedule?clip_id=${clip.id}`}
+                            className="text-xs bg-purple-600 hover:bg-purple-700 px-3 py-1.5 rounded-lg text-white transition-colors"
+                          >
+                            Schedule
+                          </Link>
+                        )}
+                        {clip.status === "ready" && (
+                          <button
+                            onClick={() =>
+                              enhanceMetadata.mutate(
+                                { clipId: clip.id, request: { platform: enhancePlatform } },
+                                {
+                                  onSuccess: (data) =>
+                                    setEnhanceResults((prev) => ({
+                                      ...prev,
+                                      [clip.id]: data,
+                                    })),
+                                }
+                              )
+                            }
+                            disabled={isEnhancing}
+                            title={`Enhance metadata for ${enhancePlatform}`}
+                            className="text-xs bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-600/40 disabled:opacity-50 px-2.5 py-1 rounded-lg font-medium transition-colors"
+                          >
+                            {isEnhancing ? "Enhancing…" : "✨ Enhance"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Inline enhance result */}
+                    {result && (
+                      <div className="bg-amber-900/20 border border-amber-700/30 rounded-lg p-3 space-y-1.5 text-xs">
+                        <p className="text-amber-300 font-medium">✨ Metadata enhanced</p>
+                        <p className="text-white font-medium">{result.clip.title}</p>
+                        {result.category && (
+                          <p className="text-slate-400">
+                            Category: <span className="text-slate-300">{result.category}</span>
+                          </p>
+                        )}
+                        {result.keywords.length > 0 && (
+                          <p className="text-slate-400 truncate">
+                            Keywords:{" "}
+                            <span className="text-slate-300">
+                              {result.keywords.slice(0, 5).join(", ")}
+                            </span>
+                          </p>
+                        )}
+                        {result.optimal_post_times.length > 0 && (
+                          <p className="text-slate-400">
+                            Best time:{" "}
+                            <span className="text-slate-300">
+                              {result.optimal_post_times[0]}
+                            </span>
+                          </p>
+                        )}
+                      </div>
                     )}
-                    <span
-                      className={`text-xs font-medium px-2 py-0.5 rounded-full capitalize ${
-                        CLIP_STATUS_COLORS[clip.status] ?? "text-slate-400"
-                      }`}
-                    >
-                      {clip.status}
-                    </span>
-                    {clip.status === "ready" && (
-                      <Link
-                        href={`/schedule?clip_id=${clip.id}`}
-                        className="text-xs bg-purple-600 hover:bg-purple-700 px-3 py-1.5 rounded-lg text-white transition-colors"
-                      >
-                        Schedule
-                      </Link>
-                    )}
-                  </div>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
