@@ -63,11 +63,15 @@ func (w *RecoveryWorker) Start(ctx context.Context) {
 // processRecoveryBatch fetches jobs eligible for retry and re-queues them.
 func (w *RecoveryWorker) processRecoveryBatch(ctx context.Context) {
 	var jobs []FailedJobRecord
-	now := time.Now().UTC()
 
+	// Use recoveryBaseDelay as the minimum back-off in the WHERE clause so we
+	// avoid fetching jobs that were very recently retried. Jobs with higher
+	// retry counts have longer computed back-offs and are skipped inside
+	// recoverJob() after the exact delay is evaluated, keeping the SQL simple
+	// while still eliminating most unnecessary reads.
 	err := w.db.WithContext(ctx).
 		Where("status IN ? AND (last_retry_at IS NULL OR last_retry_at <= ?)",
-			[]string{"pending", "recovering"}, now).
+			[]string{"pending", "recovering"}, time.Now().UTC().Add(-recoveryBaseDelay)).
 		Order("created_at ASC").
 		Limit(recoveryBatchSize).
 		Find(&jobs).Error
@@ -120,8 +124,9 @@ func (w *RecoveryWorker) requeue(ctx context.Context, rec FailedJobRecord) {
 		return
 	}
 
-	// Reset retry metadata for the re-queued attempt so workers handle it
-	// as a fresh job but retaining origin context.
+	// Reset RetryCount to 0 so the downstream worker processes the job as a
+	// fresh attempt. The total recovery attempts are tracked separately in
+	// FailedJobRecord.RetryCount, which is incremented below.
 	job.RetryCount = 0
 	job.UpdatedAt = time.Now().UTC()
 	// Remove stale error metadata so it does not pollute subsequent failures.

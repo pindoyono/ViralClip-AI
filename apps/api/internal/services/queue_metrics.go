@@ -12,7 +12,8 @@ import (
 )
 
 // Known queue names mirrored from the worker package (kept in sync manually
-// to avoid a cross-module import).
+// to avoid a cross-module import between apps/api and apps/worker).
+// TODO: extract to a shared internal package when monorepo tooling supports it.
 const (
 	metricsQueueTranscript = "transcript_queue"
 	metricsQueueClip       = "clip_queue"

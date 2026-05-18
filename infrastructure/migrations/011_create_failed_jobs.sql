@@ -1,5 +1,10 @@
 -- 011_create_failed_jobs.sql
 -- Stores dead-letter queue entries so they can be inspected and retried.
+--
+-- NOTE: id is VARCHAR(36) rather than a native UUID type so that the GORM
+-- model's gorm:"type:varchar(36)" tag produces matching DDL for both
+-- PostgreSQL and SQLite (used in unit tests). In a PostgreSQL-only deployment
+-- the column can be changed to UUID without data loss.
 
 CREATE TABLE IF NOT EXISTS failed_jobs (
     id           VARCHAR(36)  PRIMARY KEY,
