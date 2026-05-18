@@ -664,6 +664,144 @@ curl http://localhost:8080/api/v1/analytics/summary \
 
 ---
 
+## Learning Feedback Engine
+
+The Learning Feedback Engine calculates a **Content Performance Score (CPS)** per clip using:
+
+```
+CPS = WatchTime×30% + Retention×25% + Engagement×20% + CTR×15% + SubscriberGain×10%
+```
+
+Each component is normalised to 0–1 before weighting. The final CPS is on a 0–100 scale.
+
+### Top Performing Clips
+
+```
+GET /analytics/top-clips?platform=tiktok
+Authorization: Bearer <token>
+```
+
+**Query parameters:**
+| Parameter  | Type   | Description                                         |
+|------------|--------|-----------------------------------------------------|
+| `platform` | String | Optional filter: `tiktok`, `youtube`, `instagram`   |
+
+**Response `200`:**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "clip_id": "clip-uuid",
+      "title": "Epic Boss Fight Moment",
+      "platform": "tiktok",
+      "cps": 72.5,
+      "views": 145000,
+      "likes": 12000,
+      "comments": 430,
+      "watch_time": 22.4,
+      "duration": 30,
+      "viral_score": 0.91
+    }
+  ]
+}
+```
+
+**curl example:**
+```bash
+curl "http://localhost:8080/api/v1/analytics/top-clips?platform=tiktok" \
+  -H "Authorization: Bearer eyJhbGci..."
+```
+
+---
+
+### Worst Performing Clips
+
+```
+GET /analytics/worst-clips?platform=tiktok
+Authorization: Bearer <token>
+```
+
+Returns clips with the lowest CPS. Same query parameters and response shape as `/analytics/top-clips`.
+
+**curl example:**
+```bash
+curl "http://localhost:8080/api/v1/analytics/worst-clips" \
+  -H "Authorization: Bearer eyJhbGci..."
+```
+
+---
+
+### Hook Performance Patterns
+
+```
+GET /analytics/hook-patterns?platform=tiktok
+Authorization: Bearer <token>
+```
+
+Returns CPS aggregated by hook type (`curiosity`, `emotion`, `storytelling`, `controversy`, `cta`).
+
+**Response `200`:**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "hook_type": "storytelling",
+      "avg_cps": 68.3,
+      "clip_count": 14,
+      "avg_views": 93000,
+      "improvement_pct": 35.2
+    }
+  ]
+}
+```
+
+`improvement_pct` is the percentage better (+) or worse (−) than the average hook type CPS.
+
+**curl example:**
+```bash
+curl "http://localhost:8080/api/v1/analytics/hook-patterns" \
+  -H "Authorization: Bearer eyJhbGci..."
+```
+
+---
+
+### Content Recommendations
+
+```
+GET /analytics/recommendations
+Authorization: Bearer <token>
+```
+
+Returns learning-based insights per content profile, e.g.:
+- `"Storytelling hooks perform 35% better for Gaming profile"`
+- `"Shorter clips perform 18% better for Comedy profile"`
+
+**Response `200`:**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "profile_name": "Gaming Core",
+      "platform": "tiktok",
+      "insight": "Storytelling hooks perform 35% better for Gaming Core profile",
+      "confidence": 0.75
+    }
+  ]
+}
+```
+
+**curl example:**
+```bash
+curl http://localhost:8080/api/v1/analytics/recommendations \
+  -H "Authorization: Bearer eyJhbGci..."
+```
+
+---
+
+
 ## Trending Topics
 
 ### List Trending Topics

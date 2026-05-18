@@ -154,6 +154,10 @@ func Register(srv *server.Server) {
 	// Analytics routes
 	analytics := v1.Group("/analytics")
 	analytics.Get("/summary", analyticsHandler.Summary)
+	analytics.Get("/top-clips", analyticsHandler.TopClips)
+	analytics.Get("/worst-clips", analyticsHandler.WorstClips)
+	analytics.Get("/hook-patterns", analyticsHandler.HookPatterns)
+	analytics.Get("/recommendations", analyticsHandler.LearningRecommendations)
 
 	// Per-clip analytics
 	clips.Get("/:id/analytics", analyticsHandler.ClipAnalytics)

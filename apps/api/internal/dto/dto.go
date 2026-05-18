@@ -586,3 +586,38 @@ type MetadataEnhanceResponse struct {
 	// OptimalPostTimes contains suggested posting times (e.g. "7:00 PM EST on Weekdays").
 	OptimalPostTimes []string `json:"optimal_post_times"`
 }
+
+// =============================================================================
+// Learning Feedback Engine DTOs (Task 3)
+// =============================================================================
+
+// ClipCPSResponse is a clip decorated with its Content Performance Score.
+type ClipCPSResponse struct {
+	ClipID     uuid.UUID `json:"clip_id"`
+	Title      string    `json:"title"`
+	Platform   string    `json:"platform"`
+	CPS        float64   `json:"cps"`
+	Views      int64     `json:"views"`
+	Likes      int64     `json:"likes"`
+	Comments   int64     `json:"comments"`
+	WatchTime  float64   `json:"watch_time"`
+	Duration   float64   `json:"duration"`
+	ViralScore float64   `json:"viral_score"`
+}
+
+// HookPatternResponse describes CPS performance aggregated by hook type.
+type HookPatternResponse struct {
+	HookType    string  `json:"hook_type"`
+	AvgCPS      float64 `json:"avg_cps"`
+	ClipCount   int     `json:"clip_count"`
+	AvgViews    float64 `json:"avg_views"`
+	Improvement float64 `json:"improvement_pct"` // % improvement over baseline
+}
+
+// RecommendationResponse is a human-readable learning insight.
+type RecommendationResponse struct {
+	ProfileName string  `json:"profile_name"`
+	Platform    string  `json:"platform"`
+	Insight     string  `json:"insight"`
+	Confidence  float64 `json:"confidence"`
+}
