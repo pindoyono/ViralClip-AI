@@ -21,6 +21,7 @@ type YouTubeCollector struct {
 	maxResults int
 	lookback   time.Duration
 	httpClient *http.Client
+	now        func() time.Time
 }
 
 // CollectedVideo represents the raw metrics pulled from YouTube.
@@ -59,6 +60,7 @@ func NewYouTubeCollector(apiKey, regionCode string, maxResults int, lookback tim
 		maxResults: maxResults,
 		lookback:   lookback,
 		httpClient: httpClient,
+		now:        func() time.Time { return time.Now().UTC() },
 	}
 }
 
@@ -199,7 +201,7 @@ func (c *YouTubeCollector) searchVideos(ctx context.Context, query string) (*sea
 	params.Set("order", "viewCount")
 	params.Set("maxResults", fmt.Sprintf("%d", c.maxResults))
 	params.Set("regionCode", c.regionCode)
-	params.Set("publishedAfter", time.Now().UTC().Add(-c.lookback).Format(time.RFC3339))
+	params.Set("publishedAfter", c.now().Add(-c.lookback).Format(time.RFC3339))
 	params.Set("q", query)
 
 	var resp searchResponse

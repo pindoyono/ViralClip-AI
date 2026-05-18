@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -227,7 +228,7 @@ func splitKeywords(raw string) []string {
 }
 
 func roundScore(value float64) float64 {
-	return float64(int(value*10000+0.5)) / 10000
+	return math.Round(value*10000) / 10000
 }
 
 // ToOpportunityResponse converts the model into an API DTO.
