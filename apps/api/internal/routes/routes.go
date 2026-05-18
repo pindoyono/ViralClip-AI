@@ -53,6 +53,7 @@ func Register(srv *server.Server) {
 	trendingHandler := handlers.NewTrendingHandler(srv.DB)
 	contentProfileHandler := handlers.NewContentProfileHandler(srv.DB)
 	hookHandlerV2 := handlers.NewHookHandlerV2(srv.DB, srv.Config)
+	clipHandlerV2 := handlers.NewClipHandlerV2(srv.DB, srv.Config)
 
 	// Health check
 	app.Get("/health", func(c *fiber.Ctx) error {
@@ -99,6 +100,9 @@ func Register(srv *server.Server) {
 	// Hook Detection V2 routes
 	videos.Post("/:videoId/hooks/detect", hookHandlerV2.Detect)
 	videos.Get("/:videoId/hooks", hookHandlerV2.List)
+
+	// Clip Engine V2 routes
+	videos.Post("/:videoId/clips/v2/generate", clipHandlerV2.Generate)
 
 	// Clip routes
 	clips := v1.Group("/clips")

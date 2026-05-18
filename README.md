@@ -16,6 +16,7 @@
 - 🪝 **Hook Generation** — Auto-generate platform-optimized attention hooks in < 15 words
 - 🔍 **Hook Detection Engine V2** — Rule-based hook detection across 5 categories (curiosity, emotion, storytelling, controversy, CTA) with 6-signal scoring: position, emphasis, pattern count, speech pauses, and repetition
 - 📊 **Viral Scoring** — 0–100 AI score for each clip with rationale
+- 🎞️ **Dynamic Clip Engine V2** — Profile-aware clip candidate generation using Hook×50% + Emotion×20% + Story×20% + Retention×10% composite scoring across 5 content profiles (gaming, comedy, education, politics, podcast)
 - 📅 **Multi-Platform Scheduling** — Publish to TikTok, YouTube Shorts & Instagram Reels
 - 📈 **Analytics Dashboard** — Real-time engagement metrics across all connected platforms
 - 🔔 **Trending Topics** — Platform-wide trend monitoring for content alignment
@@ -304,6 +305,7 @@ pnpm jest
 | GET    | `/api/v1/videos/:id/clips`           | Yes  | List clips for video             |
 | POST   | `/api/v1/videos/:id/hooks/detect`    | Yes  | **[V2]** Detect hook moments     |
 | GET    | `/api/v1/videos/:id/hooks`           | Yes  | **[V2]** List stored hook detections |
+| POST   | `/api/v1/videos/:id/clips/v2/generate` | Yes | **[V2]** Generate clips (profile-aware) |
 
 ### Clips
 
@@ -336,7 +338,8 @@ pnpm jest
 | Method | Endpoint                       | Description                             |
 |--------|--------------------------------|-----------------------------------------|
 | POST   | `/api/v1/transcript`           | Transcribe video with Whisper           |
-| POST   | `/api/v1/clips`                | Identify viral clip segments            |
+| POST   | `/api/v1/clips`                | Identify viral clip segments (GPT-4)    |
+| POST   | `/api/v1/clips/v2/generate`    | **[V2]** Profile-aware clip generation  |
 | POST   | `/api/v1/hooks`                | Generate viral hooks (GPT-4)            |
 | POST   | `/api/v1/hooks/v2/detect`      | **[V2]** Detect hook moments in transcript |
 | POST   | `/api/v1/metadata`             | Generate platform metadata              |

@@ -362,3 +362,53 @@ type HookListResponse struct {
 	Hooks   []HookDetectionResultResponse `json:"hooks"`
 	Total   int                           `json:"total"`
 }
+
+// =============================================================================
+// Clip Engine V2 DTOs
+// =============================================================================
+
+// ClipV2Segment is a single transcript segment in a V2 clip generation request.
+type ClipV2Segment struct {
+	Text  string  `json:"text"`
+	Start float64 `json:"start"`
+	End   float64 `json:"end"`
+}
+
+// ClipV2HookDetection is a hook detection result forwarded to the AI service.
+type ClipV2HookDetection struct {
+	Start          float64 `json:"start"`
+	End            float64 `json:"end"`
+	Type           string  `json:"type"`
+	Score          int     `json:"score"`
+	MatchedPattern string  `json:"matched_pattern"`
+}
+
+// ClipV2GenerateRequest is the request body for POST /api/v1/videos/:id/clips/v2/generate.
+type ClipV2GenerateRequest struct {
+	Segments     []ClipV2Segment `json:"segments" validate:"required,min=1"`
+	ProfileType  string          `json:"profile_type"`  // gaming|comedy|education|politics|podcast|general
+	MinClipScore int             `json:"min_clip_score"` // default 50
+	MaxClips     int             `json:"max_clips"`      // default 10
+}
+
+// ClipV2ResultItem is a single clip candidate returned from the V2 engine.
+type ClipV2ResultItem struct {
+	Start          string  `json:"start"`           // HH:MM:SS
+	End            string  `json:"end"`             // HH:MM:SS
+	StartSeconds   float64 `json:"start_seconds"`
+	EndSeconds     float64 `json:"end_seconds"`
+	Score          int     `json:"score"`
+	HookScore      float64 `json:"hook_score"`
+	EmotionScore   float64 `json:"emotion_score"`
+	StoryScore     float64 `json:"story_score"`
+	RetentionScore float64 `json:"retention_score"`
+	ProfileType    string  `json:"profile_type"`
+}
+
+// ClipV2GenerateResponse is the response body for the V2 clip generation endpoint.
+type ClipV2GenerateResponse struct {
+	VideoID     string             `json:"video_id"`
+	ProfileType string             `json:"profile_type"`
+	Clips       []ClipV2ResultItem `json:"clips"`
+	Total       int                `json:"total"`
+}

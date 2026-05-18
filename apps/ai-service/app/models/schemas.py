@@ -269,3 +269,56 @@ class HookDetectionResponse(BaseModel):
     video_id: str
     hooks: List[HookDetectionResult]
     total: int = Field(..., description="Total number of hooks detected")
+
+
+# ---------------------------------------------------------------------------
+# Clip Engine V2 schemas
+# ---------------------------------------------------------------------------
+
+class ProfileType(str, Enum):
+    GAMING    = "gaming"
+    COMEDY    = "comedy"
+    EDUCATION = "education"
+    POLITICS  = "politics"
+    PODCAST   = "podcast"
+    GENERAL   = "general"
+
+
+class ClipV2ResultSchema(BaseModel):
+    """A single clip candidate from the V2 engine."""
+    start: str = Field(..., description="Clip start time as HH:MM:SS")
+    end: str   = Field(..., description="Clip end time as HH:MM:SS")
+    start_seconds: float
+    end_seconds: float
+    score: int = Field(..., ge=0, le=100, description="Composite clip score 0–100")
+    hook_score:      float = Field(..., description="Best hook score in window (0–100)")
+    emotion_score:   float = Field(..., description="Average emotion score in window (0–100)")
+    story_score:     float = Field(..., description="Average story arc score in window (0–100)")
+    retention_score: float = Field(..., description="Predicted retention score (0–100)")
+    profile_type:    str   = Field(..., description="Content profile used")
+
+
+class ClipGenerateV2Request(BaseModel):
+    """Request body for the V2 clip generation endpoint."""
+    video_id: str
+    segments: List[TranscriptSegmentInput] = Field(
+        ..., min_length=1, description="Ordered transcript segments"
+    )
+    hook_detections: List[HookDetectionResult] = Field(
+        default_factory=list,
+        description="V2 hook detections (from /hooks/v2/detect); can be empty",
+    )
+    profile_type: ProfileType = Field(
+        default=ProfileType.GENERAL,
+        description="Content profile controlling clip duration range",
+    )
+    min_clip_score: int = Field(default=50, ge=0, le=100)
+    max_clips: int      = Field(default=10, ge=1, le=30)
+
+
+class ClipGenerateV2Response(BaseModel):
+    """Response from the V2 clip generation endpoint."""
+    video_id: str
+    profile_type: str
+    clips: List[ClipV2ResultSchema]
+    total: int

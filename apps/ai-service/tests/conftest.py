@@ -23,11 +23,17 @@ def pytest_configure(config):
         "app.services.hook_pattern_detector",
         "app.services.hook_score_calculator",
         "app.services.hook_engine_v2",
+        "app.services.emotion_analyzer",
+        "app.services.story_arc_detector",
+        "app.services.retention_predictor",
+        "app.services.clip_score_calculator_v2",
+        "app.services.clip_engine_v2",
         "app.services.metadata_service",
         "app.services.subtitle_service",
         "app.services.category_service",
         "app.routers.process",
         "app.routers.hooks_v2",
+        "app.routers.clips_v2",
     ]:
         try:
             importlib.import_module(mod)
