@@ -96,3 +96,71 @@ export interface ApiResponse<T> {
   data: T;
   error?: string;
 }
+
+// =============================================================================
+// V2 — Hook Detection
+// =============================================================================
+
+export interface TranscriptSegment {
+  text: string;
+  start: number;
+  end: number;
+}
+
+export interface HookDetection {
+  start: number;
+  end: number;
+  type: string;
+  score: number;
+  matched_pattern: string;
+}
+
+export interface HookDetectRequest {
+  segments: TranscriptSegment[];
+  min_score?: number;
+}
+
+export interface HookDetectResponse {
+  video_id: string;
+  hooks: HookDetection[];
+  total: number;
+}
+
+// =============================================================================
+// V2 — Dynamic Clip Engine
+// =============================================================================
+
+export type ClipV2ProfileType =
+  | "gaming"
+  | "comedy"
+  | "education"
+  | "politics"
+  | "podcast"
+  | "general";
+
+export interface ClipV2ResultItem {
+  start: string;
+  end: string;
+  start_seconds: number;
+  end_seconds: number;
+  score: number;
+  hook_score: number;
+  emotion_score: number;
+  story_score: number;
+  retention_score: number;
+  profile_type: string;
+}
+
+export interface ClipV2GenerateRequest {
+  segments: TranscriptSegment[];
+  profile_type?: ClipV2ProfileType;
+  min_clip_score?: number;
+  max_clips?: number;
+}
+
+export interface ClipV2GenerateResponse {
+  video_id: string;
+  profile_type: string;
+  clips: ClipV2ResultItem[];
+  total: number;
+}
