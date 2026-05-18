@@ -26,7 +26,7 @@ export default function SchedulePage() {
       <div className="bg-slate-800 border border-slate-700 rounded-xl">
         {isLoading ? (
           <div className="p-6 text-center text-slate-400">Loading…</div>
-        ) : !data?.posts?.length ? (
+        ) : !data?.length ? (
           <div className="p-6 text-center text-slate-400">
             <p className="text-lg font-medium text-slate-300">
               No scheduled posts
@@ -37,7 +37,7 @@ export default function SchedulePage() {
           </div>
         ) : (
           <ul className="divide-y divide-slate-700">
-            {data.posts.map((post) => (
+            {data.map((post) => (
               <li
                 key={post.id}
                 className="flex items-center gap-4 px-6 py-4"

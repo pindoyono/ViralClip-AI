@@ -126,8 +126,11 @@ type ClipResponse struct {
 }
 
 type ClipListResponse struct {
-	Clips      []ClipResponse `json:"clips"`
-	Pagination PaginationMeta `json:"pagination"`
+	Data       []ClipResponse `json:"data"`
+	Total      int64          `json:"total"`
+	Page       int            `json:"page"`
+	Limit      int            `json:"limit"`
+	TotalPages int            `json:"total_pages"`
 }
 
 type UpdateClipRequest struct {
@@ -224,14 +227,31 @@ type ScheduledPostResponse struct {
 // =============================================================================
 
 type AnalyticsSummaryResponse struct {
-	TotalViews     int64   `json:"total_views"`
-	TotalLikes     int64   `json:"total_likes"`
-	TotalComments  int64   `json:"total_comments"`
-	TotalShares    int64   `json:"total_shares"`
-	AvgEngagement  float64 `json:"avg_engagement_rate"`
-	TopClip        *ClipResponse `json:"top_clip,omitempty"`
-	PublishedClips int     `json:"published_clips"`
-	ScheduledPosts int     `json:"scheduled_posts"`
+	TotalViews      int64         `json:"total_views"`
+	TotalLikes      int64         `json:"total_likes"`
+	TotalComments   int64         `json:"total_comments"`
+	TotalShares     int64         `json:"total_shares"`
+	AvgEngagement   float64       `json:"avg_engagement_rate"`
+	TopClip         *ClipResponse `json:"top_clip,omitempty"`
+	TopPlatform     string        `json:"top_platform"`
+	PublishedClips  int           `json:"published_clips"`
+	ClipsPublished  int           `json:"clips_published"`
+	ScheduledPosts  int           `json:"scheduled_posts"`
+}
+
+// ClipAnalyticsResponse represents per-platform analytics for a single clip.
+type ClipAnalyticsResponse struct {
+	ID             string  `json:"id"`
+	ClipID         string  `json:"clip_id"`
+	Platform       string  `json:"platform"`
+	Views          int64   `json:"views"`
+	Likes          int64   `json:"likes"`
+	Comments       int64   `json:"comments"`
+	Shares         int64   `json:"shares"`
+	Saves          int64   `json:"saves"`
+	Reach          int64   `json:"reach"`
+	EngagementRate float64 `json:"engagement_rate"`
+	SyncedAt       string  `json:"synced_at"`
 }
 
 // =============================================================================

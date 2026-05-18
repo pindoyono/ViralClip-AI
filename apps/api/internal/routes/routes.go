@@ -112,6 +112,9 @@ func Register(srv *server.Server) {
 	analytics := v1.Group("/analytics")
 	analytics.Get("/summary", analyticsHandler.Summary)
 
+	// Per-clip analytics
+	clips.Get("/:id/analytics", analyticsHandler.ClipAnalytics)
+
 	// Trending topics routes
 	trending := v1.Group("/trending")
 	trending.Get("/", trendingHandler.List)

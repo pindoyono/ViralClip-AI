@@ -15,7 +15,7 @@ export default function DashboardPage() {
   const stats = [
     {
       label: "Videos Uploaded",
-      value: String(videosData?.total ?? 0),
+      value: String(videosData?.pagination?.total ?? 0),
       change: "+0 this week",
     },
     {
@@ -30,7 +30,7 @@ export default function DashboardPage() {
     },
     {
       label: "Posts Scheduled",
-      value: String(postsData?.total ?? 0),
+      value: String(postsData?.length ?? 0),
       change: "Upcoming",
     },
   ];

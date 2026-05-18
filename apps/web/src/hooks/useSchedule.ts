@@ -14,9 +14,9 @@ export function useScheduledPosts(page = 1, limit = 20) {
   return useQuery({
     queryKey: ["scheduled_posts", page, limit],
     queryFn: async () => {
-      const { data } = await apiClient.get<{
-        data: { posts: ScheduledPost[]; total: number; page: number; limit: number; total_pages: number };
-      }>(`/social/posts?page=${page}&limit=${limit}`);
+      const { data } = await apiClient.get<{ data: ScheduledPost[] }>(
+        `/social/schedule?page=${page}&limit=${limit}`
+      );
       return data.data;
     },
   });
@@ -26,7 +26,7 @@ export function useCreateScheduledPost() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (payload: CreateScheduledPostPayload) =>
-      apiClient.post<{ data: ScheduledPost }>("/social/posts", payload),
+      apiClient.post<{ data: ScheduledPost }>("/social/schedule", payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["scheduled_posts"] });
     },
@@ -36,7 +36,7 @@ export function useCreateScheduledPost() {
 export function useCancelScheduledPost() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => apiClient.delete(`/social/posts/${id}`),
+    mutationFn: (id: string) => apiClient.delete(`/social/schedule/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["scheduled_posts"] });
     },
