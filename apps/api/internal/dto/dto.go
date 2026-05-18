@@ -244,6 +244,7 @@ type AnalyticsSummaryResponse struct {
 	TopClip         *ClipResponse `json:"top_clip,omitempty"`
 	TopPlatform     string        `json:"top_platform"`
 	PublishedClips  int           `json:"published_clips"`
+	// ClipsPublished is an alias for PublishedClips kept for backward compatibility.
 	ClipsPublished  int           `json:"clips_published"`
 	ScheduledPosts  int           `json:"scheduled_posts"`
 }

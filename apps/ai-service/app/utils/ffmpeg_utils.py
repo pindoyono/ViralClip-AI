@@ -102,10 +102,22 @@ def extract_clip(
     start_time: float,
     end_time: float,
     add_fade: bool = True,
+    storage_base_dir: Optional[str] = None,
 ) -> str:
-    """Extract a clip segment from a video."""
-    video_path = os.path.realpath(video_path)
-    output_path = os.path.realpath(output_path)
+    """Extract a clip segment from a video.
+
+    Args:
+        video_path: Path to the source video file.
+        output_path: Destination path for the extracted clip.
+        start_time: Start time in seconds.
+        end_time: End time in seconds.
+        add_fade: Whether to add fade-in/out transitions.
+        storage_base_dir: Optional base directory that both video_path and
+            output_path must reside within.  Pass the application storage root
+            to prevent path-traversal attacks.
+    """
+    video_path = _validate_storage_path(video_path, storage_base_dir)
+    output_path = _validate_storage_path(output_path, storage_base_dir)
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     duration = end_time - start_time

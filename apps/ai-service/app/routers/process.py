@@ -200,7 +200,7 @@ async def process_clips(request: ProcessClipsRequest):
         clip_filename = f"clip_{i:03d}.mp4"
         clip_path = os.path.join(clips_output_dir, clip_filename)
         try:
-            extract_clip(safe_path, clip_path, seg.start_time, seg.end_time)
+            extract_clip(safe_path, clip_path, seg.start_time, seg.end_time, storage_base_dir=settings.local_storage_path)
         except Exception as e:
             logger.warning(f"Failed to extract clip {i} for {request.video_id}: {e}; skipping")
             continue

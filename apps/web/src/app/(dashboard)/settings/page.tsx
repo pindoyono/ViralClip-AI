@@ -88,14 +88,18 @@ export default function SettingsPage() {
   const handleConnectAccount = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!connectPlatform || !connectUsername.trim()) return;
-    await connectAccount.mutateAsync({
-      platform: connectPlatform,
-      username: connectUsername.trim(),
-    });
-    setConnectUsername("");
-    setConnectPlatform("tiktok");
-    setConnectSaved(true);
-    setTimeout(() => setConnectSaved(false), 3000);
+    try {
+      await connectAccount.mutateAsync({
+        platform: connectPlatform,
+        username: connectUsername.trim(),
+      });
+      setConnectUsername("");
+      setConnectPlatform("tiktok");
+      setConnectSaved(true);
+      setTimeout(() => setConnectSaved(false), 3000);
+    } catch {
+      // error is exposed via connectAccount.isError / connectAccount.error
+    }
   };
 
   return (
