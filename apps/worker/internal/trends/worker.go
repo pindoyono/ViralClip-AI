@@ -12,6 +12,8 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+var defaultSeedQueries = []string{"viral shorts", "trending shorts", "viral clips"}
+
 // Collector abstracts the upstream trend source.
 type Collector interface {
 	Collect(ctx context.Context, queries []string) ([]CollectedVideo, error)
@@ -106,7 +108,7 @@ func (w *TrendCollectorWorker) RunOnce(ctx context.Context) error {
 }
 
 func (w *TrendCollectorWorker) buildQueries(ctx context.Context) ([]string, error) {
-	queries := []string{"viral shorts", "trending shorts", "viral clips"}
+	queries := append([]string(nil), defaultSeedQueries...)
 	var profiles []ContentProfile
 	if err := w.db.WithContext(ctx).Limit(50).Find(&profiles).Error; err != nil {
 		return nil, err

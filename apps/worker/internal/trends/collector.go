@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 const sourcePlatformYouTube = "youtube"
@@ -48,6 +50,7 @@ func NewYouTubeCollector(apiKey, regionCode string, maxResults int, lookback tim
 		regionCode = "US"
 	}
 	if maxResults <= 0 || maxResults > 50 {
+		log.Warn().Int("configured_max_results", maxResults).Msg("YouTubeCollector clamped invalid maxResults to 10")
 		maxResults = 10
 	}
 	if lookback <= 0 {

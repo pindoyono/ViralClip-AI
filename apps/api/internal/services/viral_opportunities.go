@@ -14,9 +14,10 @@ import (
 )
 
 const (
-	trendingWindow       = 72 * time.Hour
-	recommendationWindow = 7 * 24 * time.Hour
-	defaultFitScore      = 15
+	trendingWindow            = 72 * time.Hour
+	recommendationWindow      = 7 * 24 * time.Hour
+	defaultFitScore           = 15
+	defaultRecommendationNote = "High viral score among recent YouTube videos"
 )
 
 // ViralOpportunityFilters controls list queries.
@@ -116,7 +117,7 @@ func (e *RecommendationEngine) Recommend(opportunities []models.ViralOpportunity
 			continue
 		}
 		if len(reasons) == 0 {
-			reasons = append(reasons, "High viral score across recently collected YouTube videos")
+			reasons = append(reasons, defaultRecommendationNote)
 		}
 		recommendationScore := roundScore(opportunity.ViralScore*0.7 + fitScore)
 		results = append(results, dto.ViralOpportunityRecommendationResponse{
@@ -142,7 +143,7 @@ func (e *RecommendationEngine) Recommend(opportunities []models.ViralOpportunity
 
 func scoreOpportunity(opportunity models.ViralOpportunity, profiles []models.ContentProfile) ([]string, []string, float64) {
 	if len(profiles) == 0 {
-		return []string{"High viral score across recently collected YouTube videos"}, nil, defaultFitScore
+		return []string{defaultRecommendationNote}, nil, defaultFitScore
 	}
 
 	title := strings.ToLower(opportunity.Title)

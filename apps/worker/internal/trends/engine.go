@@ -54,6 +54,7 @@ func (e *TrendEngine) Score(videos []CollectedVideo, previousViews map[string]in
 			outlierScore = float64(video.Views) / float64(video.SubscriberCount)
 		}
 		growthScore := float64(video.Views - previous)
+		// ViralScore follows the requested weighting model: view velocity 35%, outlier score 25%, engagement 20%, growth 20%.
 		viralScore := (viewVelocity * 0.35) + (outlierScore * 0.25) + (engagementRate * 0.20) + (growthScore * 0.20)
 		scored = append(scored, ScoredOpportunity{
 			SourcePlatform:  video.SourcePlatform,
