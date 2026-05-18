@@ -122,6 +122,7 @@ type ClipResponse struct {
 	Hashtags     []string          `json:"hashtags"`
 	SuggestedFor []string          `json:"suggested_for"`
 	Status       models.ClipStatus `json:"status"`
+	HasSubtitles bool              `json:"has_subtitles"`
 	CreatedAt    time.Time         `json:"created_at"`
 }
 
@@ -411,4 +412,31 @@ type ClipV2GenerateResponse struct {
 	ProfileType string             `json:"profile_type"`
 	Clips       []ClipV2ResultItem `json:"clips"`
 	Total       int                `json:"total"`
+}
+
+// =============================================================================
+// Subtitle Burning DTOs
+// =============================================================================
+
+// SubtitleBurnRequest is the request body for POST /api/v1/videos/:id/subtitles/burn.
+// All fields are optional; when omitted the AI service uses its defaults.
+type SubtitleBurnRequest struct {
+	// Style controls the visual appearance of the subtitles.
+	// Valid values: "default", "bold", "outline", "shadow".
+	Style string `json:"style"`
+
+	// FontSize is the subtitle font size in points (12–72, default 24).
+	FontSize int `json:"font_size"`
+
+	// PrimaryColor is the subtitle text colour in ASS/SSA &HBBGGRR format.
+	PrimaryColor string `json:"primary_color"`
+
+	// OutlineColor is the subtitle outline/border colour in ASS/SSA &HBBGGRR format.
+	OutlineColor string `json:"outline_color"`
+}
+
+// SubtitleBurnResponse is the response body for the subtitle burn endpoint.
+type SubtitleBurnResponse struct {
+	VideoID        string `json:"video_id"`
+	ClipsProcessed int    `json:"clips_processed"`
 }

@@ -178,3 +178,23 @@ export interface ClipV2GenerateResponse {
   clips: ClipV2ResultItem[];
   total: number;
 }
+
+// =============================================================================
+// Subtitle Burning
+// =============================================================================
+
+export type SubtitleStyle = "default" | "bold" | "outline" | "shadow";
+
+/** Optional style overrides for POST /api/v1/videos/:id/subtitles/burn */
+export interface SubtitleBurnRequest {
+  style?: SubtitleStyle;
+  font_size?: number;
+  primary_color?: string;
+  outline_color?: string;
+}
+
+/** Response from POST /api/v1/videos/:id/subtitles/burn */
+export interface SubtitleBurnResponse {
+  video_id: string;
+  clips_processed: number;
+}

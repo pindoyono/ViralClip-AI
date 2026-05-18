@@ -54,6 +54,7 @@ func Register(srv *server.Server) {
 	contentProfileHandler := handlers.NewContentProfileHandler(srv.DB)
 	hookHandlerV2 := handlers.NewHookHandlerV2(srv.DB, srv.Config)
 	clipHandlerV2 := handlers.NewClipHandlerV2(srv.DB, srv.Config)
+	subtitleHandler := handlers.NewSubtitleHandler(srv.DB, srv.Config)
 
 	// Health check
 	app.Get("/health", func(c *fiber.Ctx) error {
@@ -103,6 +104,9 @@ func Register(srv *server.Server) {
 
 	// Clip Engine V2 routes
 	videos.Post("/:videoId/clips/v2/generate", clipHandlerV2.Generate)
+
+	// Subtitle burning routes
+	videos.Post("/:videoId/subtitles/burn", subtitleHandler.BurnSubtitles)
 
 	// Clip routes
 	clips := v1.Group("/clips")
