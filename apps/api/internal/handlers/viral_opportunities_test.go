@@ -162,7 +162,6 @@ func TestViralOpportunityHandlerRecommendations(t *testing.T) {
 	}
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&envelope))
 	assert.True(t, envelope.Success)
-	assert.True(t, envelope.Success)
 	require.Len(t, envelope.Data, 1)
 	assert.Equal(t, "top-hit", envelope.Data[0].Opportunity["external_video_id"])
 	assert.NotEmpty(t, envelope.Data[0].Reasons)

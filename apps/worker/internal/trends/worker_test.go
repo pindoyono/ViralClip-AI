@@ -57,3 +57,7 @@ func TestTrendCollectorWorkerRunOnceUpserts(t *testing.T) {
 	assert.Equal(t, int64(900), stored.PreviousViews)
 	assert.Equal(t, 300.0, stored.GrowthScore)
 }
+
+func TestViralOpportunityTableName(t *testing.T) {
+	assert.Equal(t, "viral_opportunities", ViralOpportunity{}.TableName())
+}
