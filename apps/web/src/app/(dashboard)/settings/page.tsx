@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useProfile, useUpdateProfile, useChangePassword } from "@/hooks/useProfile";
-import { useSocialAccounts, useDisconnectSocialAccount } from "@/hooks/useSocialAccounts";
+import { useSocialAccounts, useConnectSocialAccount, useDisconnectSocialAccount } from "@/hooks/useSocialAccounts";
 import {
   useContentProfiles,
   useCreateContentProfile,
@@ -30,6 +30,7 @@ export default function SettingsPage() {
   const updateProfile = useUpdateProfile();
   const changePassword = useChangePassword();
   const { data: accounts, isLoading: accountsLoading } = useSocialAccounts();
+  const connectAccount = useConnectSocialAccount();
   const disconnectAccount = useDisconnectSocialAccount();
   const { data: contentProfiles, isLoading: profilesLoading } = useContentProfiles();
   const createContentProfile = useCreateContentProfile();
@@ -44,6 +45,10 @@ export default function SettingsPage() {
 
   const [newProfileName, setNewProfileName] = useState("");
   const [newProfilePlatform, setNewProfilePlatform] = useState("general");
+
+  const [connectPlatform, setConnectPlatform] = useState("tiktok");
+  const [connectUsername, setConnectUsername] = useState("");
+  const [connectSaved, setConnectSaved] = useState(false);
 
   const displayUser = profile ?? user;
 
@@ -78,6 +83,19 @@ export default function SettingsPage() {
     });
     setNewProfileName("");
     setNewProfilePlatform("general");
+  };
+
+  const handleConnectAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!connectPlatform || !connectUsername.trim()) return;
+    await connectAccount.mutateAsync({
+      platform: connectPlatform,
+      username: connectUsername.trim(),
+    });
+    setConnectUsername("");
+    setConnectPlatform("tiktok");
+    setConnectSaved(true);
+    setTimeout(() => setConnectSaved(false), 3000);
   };
 
   return (
@@ -261,11 +279,7 @@ export default function SettingsPage() {
         <h2 className="text-white font-semibold text-lg">Social Accounts</h2>
         {accountsLoading ? (
           <p className="text-slate-400 text-sm">Loading…</p>
-        ) : !accounts?.length ? (
-          <p className="text-slate-400 text-sm">
-            No social accounts connected yet. Connect an account to start scheduling posts.
-          </p>
-        ) : (
+        ) : accounts?.length ? (
           <ul className="space-y-3">
             {accounts.map((account) => (
               <li
@@ -300,6 +314,42 @@ export default function SettingsPage() {
               </li>
             ))}
           </ul>
+        ) : null}
+
+        <form onSubmit={handleConnectAccount} className="flex gap-3 flex-wrap">
+          <select
+            value={connectPlatform}
+            onChange={(e) => setConnectPlatform(e.target.value)}
+            className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+          >
+            <option value="tiktok">TikTok</option>
+            <option value="instagram">Instagram</option>
+            <option value="youtube">YouTube</option>
+            <option value="twitter">Twitter</option>
+          </select>
+          <input
+            type="text"
+            value={connectUsername}
+            onChange={(e) => setConnectUsername(e.target.value)}
+            placeholder="@username"
+            required
+            className="flex-1 min-w-[160px] px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+          />
+          <button
+            type="submit"
+            disabled={connectAccount.isPending || !connectUsername.trim()}
+            className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 px-4 py-2 rounded-lg text-white text-sm font-medium transition-colors"
+          >
+            {connectAccount.isPending ? "Connecting…" : "Connect"}
+          </button>
+        </form>
+        {connectSaved && (
+          <p className="text-green-400 text-sm">Account connected successfully.</p>
+        )}
+        {connectAccount.isError && (
+          <p className="text-red-400 text-sm">
+            {(connectAccount.error as Error)?.message ?? "Failed to connect account"}
+          </p>
         )}
       </section>
 

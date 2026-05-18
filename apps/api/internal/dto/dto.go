@@ -193,6 +193,15 @@ type SocialAccountResponse struct {
 	LastSyncedAt   *time.Time            `json:"last_synced_at,omitempty"`
 }
 
+type ConnectSocialAccountRequest struct {
+	Platform       string `json:"platform" validate:"required,oneof=tiktok instagram youtube twitter"`
+	Username       string `json:"username" validate:"required,min=1,max=100"`
+	DisplayName    string `json:"display_name"`
+	AvatarURL      string `json:"avatar_url"`
+	AccessToken    string `json:"access_token"`
+	FollowersCount int64  `json:"followers_count"`
+}
+
 // =============================================================================
 // Scheduled Post DTOs
 // =============================================================================

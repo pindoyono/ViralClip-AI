@@ -1,19 +1,20 @@
 /**
  * Tests for useSocialAccounts and useDisconnectSocialAccount hooks.
  */
-import { renderHook, waitFor } from "@testing-library/react";
+import { renderHook, waitFor, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
 
 jest.mock("@/lib/api", () => ({
   apiClient: {
     get: jest.fn(),
+    post: jest.fn(),
     delete: jest.fn(),
   },
 }));
 
 import { apiClient } from "@/lib/api";
-import { useSocialAccounts, useDisconnectSocialAccount } from "@/hooks/useSocialAccounts";
+import { useSocialAccounts, useConnectSocialAccount, useDisconnectSocialAccount } from "@/hooks/useSocialAccounts";
 import type { SocialAccount } from "@/types";
 
 function createWrapper() {
@@ -104,5 +105,40 @@ describe("useDisconnectSocialAccount", () => {
     result.current.mutate("nonexistent");
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.error).toBeDefined();
+  });
+});
+
+describe("useConnectSocialAccount", () => {
+  afterEach(() => jest.clearAllMocks());
+
+  it("POSTs to /social/accounts with correct payload", async () => {
+    (apiClient.post as jest.Mock).mockResolvedValueOnce({
+      data: { data: MOCK_ACCOUNT },
+    });
+    (apiClient.get as jest.Mock).mockResolvedValue({ data: { data: [] } });
+
+    const { result } = renderHook(() => useConnectSocialAccount(), {
+      wrapper: createWrapper(),
+    });
+
+    result.current.mutate({ platform: "tiktok", username: "my_tiktok" });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(apiClient.post).toHaveBeenCalledWith(
+      "/social/accounts",
+      expect.objectContaining({ platform: "tiktok", username: "my_tiktok" })
+    );
+  });
+
+  it("surfaces an error on duplicate account", async () => {
+    (apiClient.post as jest.Mock).mockRejectedValueOnce(new Error("This account is already connected"));
+    (apiClient.get as jest.Mock).mockResolvedValue({ data: { data: [] } });
+
+    const { result } = renderHook(() => useConnectSocialAccount(), {
+      wrapper: createWrapper(),
+    });
+
+    result.current.mutate({ platform: "tiktok", username: "existing" });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect((result.current.error as Error)?.message).toBe("This account is already connected");
   });
 });

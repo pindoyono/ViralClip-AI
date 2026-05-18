@@ -105,6 +105,7 @@ func Register(srv *server.Server) {
 	// Social media routes
 	social := v1.Group("/social")
 	social.Get("/accounts", socialHandler.ListAccounts)
+	social.Post("/accounts", socialHandler.ConnectAccount)
 	social.Delete("/accounts/:id", socialHandler.DisconnectAccount)
 	social.Post("/schedule", socialHandler.SchedulePost)
 	social.Get("/schedule", socialHandler.ListScheduledPosts)
