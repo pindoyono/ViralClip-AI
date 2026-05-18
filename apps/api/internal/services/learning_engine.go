@@ -164,7 +164,7 @@ func (e *LearningEngine) HookPatterns(ctx context.Context, userID string, platfo
 			AVG(ca.views) AS avg_views,
 			AVG(ca.likes) AS avg_likes,
 			AVG(ca.watch_time) AS avg_wt,
-			AVG(0) AS duration,
+			AVG(c.duration) AS duration,
 			AVG(0) AS ctr`).
 		Joins("JOIN videos v ON v.id = hd.video_id").
 		Joins("JOIN clips c ON c.video_id = v.id").

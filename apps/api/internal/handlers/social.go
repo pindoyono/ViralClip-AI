@@ -369,7 +369,7 @@ func (h *SocialHandler) createScheduledPostFromRequest(c *fiber.Ctx, userID stri
 		post.PublishAt = &post.ScheduledAt
 	}
 
-	if post.PublishAt != nil && post.PublishAt.Before(time.Now().UTC().Add(-2*time.Second)) {
+	if post.PublishAt != nil && post.PublishAt.Before(time.Now().UTC().Add(-5*time.Second)) {
 		return utils.BadRequest(c, "Scheduled time must be in the future")
 	}
 
