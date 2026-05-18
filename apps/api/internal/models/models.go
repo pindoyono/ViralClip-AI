@@ -35,20 +35,20 @@ const (
 // User represents a registered user.
 type User struct {
 	Base
-	Email           string           `gorm:"uniqueIndex;not null" json:"email"`
-	PasswordHash    string           `gorm:"not null" json:"-"`
-	Name            string           `gorm:"not null" json:"name"`
-	AvatarURL       string           `json:"avatar_url"`
-	IsEmailVerified bool             `gorm:"not null" json:"is_email_verified"`
-	IsActive        bool             `gorm:"not null" json:"is_active"`
-	Tier            SubscriptionTier `gorm:"default:'free'" json:"tier"`
-	StripeCustomerID string          `gorm:"uniqueIndex" json:"stripe_customer_id,omitempty"`
-	StripeSubscriptionID string      `json:"stripe_subscription_id,omitempty"`
-	GoogleID        string           `gorm:"index" json:"google_id,omitempty"`
-	RefreshToken    string           `json:"-"`
-	LastLoginAt     *time.Time       `json:"last_login_at,omitempty"`
-	ResetToken      string           `json:"-"`
-	ResetTokenExpiry *time.Time      `json:"-"`
+	Email                string           `gorm:"uniqueIndex;not null" json:"email"`
+	PasswordHash         string           `gorm:"not null" json:"-"`
+	Name                 string           `gorm:"not null" json:"name"`
+	AvatarURL            string           `json:"avatar_url"`
+	IsEmailVerified      bool             `gorm:"not null" json:"is_email_verified"`
+	IsActive             bool             `gorm:"not null" json:"is_active"`
+	Tier                 SubscriptionTier `gorm:"default:'free'" json:"tier"`
+	StripeCustomerID     string           `gorm:"uniqueIndex" json:"stripe_customer_id,omitempty"`
+	StripeSubscriptionID string           `json:"stripe_subscription_id,omitempty"`
+	GoogleID             string           `gorm:"index" json:"google_id,omitempty"`
+	RefreshToken         string           `json:"-"`
+	LastLoginAt          *time.Time       `json:"last_login_at,omitempty"`
+	ResetToken           string           `json:"-"`
+	ResetTokenExpiry     *time.Time       `json:"-"`
 
 	// Relationships
 	ContentProfiles []ContentProfile `gorm:"foreignKey:UserID" json:"content_profiles,omitempty"`
@@ -63,9 +63,9 @@ type ContentProfile struct {
 	Name        string    `gorm:"not null" json:"name"`
 	Platform    string    `gorm:"not null" json:"platform"` // youtube, tiktok, instagram, general
 	Niche       string    `json:"niche"`
-	ToneStyle   string    `json:"tone_style"`   // educational, entertaining, inspirational
-	AudienceAge string    `json:"audience_age"` // 18-24, 25-34, etc.
-	Keywords    string    `gorm:"type:text" json:"keywords"`  // comma-separated
+	ToneStyle   string    `json:"tone_style"`                // educational, entertaining, inspirational
+	AudienceAge string    `json:"audience_age"`              // 18-24, 25-34, etc.
+	Keywords    string    `gorm:"type:text" json:"keywords"` // comma-separated
 	IsDefault   bool      `gorm:"default:false" json:"is_default"`
 
 	User   User    `gorm:"foreignKey:UserID" json:"user,omitempty"`
@@ -94,8 +94,8 @@ type Video struct {
 	StoragePath      string      `json:"storage_path"`
 	StorageURL       string      `json:"storage_url"`
 	ThumbnailURL     string      `json:"thumbnail_url"`
-	Duration         float64     `json:"duration"`       // in seconds
-	FileSize         int64       `json:"file_size"`      // in bytes
+	Duration         float64     `json:"duration"`  // in seconds
+	FileSize         int64       `json:"file_size"` // in bytes
 	MimeType         string      `json:"mime_type"`
 	Width            int         `json:"width"`
 	Height           int         `json:"height"`
@@ -132,10 +132,10 @@ type Clip struct {
 	StoragePath  string     `json:"storage_path"`
 	StorageURL   string     `json:"storage_url"`
 	ThumbnailURL string     `json:"thumbnail_url"`
-	StartTime    float64    `json:"start_time"`   // seconds from original video
-	EndTime      float64    `json:"end_time"`     // seconds from original video
-	Duration     float64    `json:"duration"`     // clip duration in seconds
-	ViralScore   float64    `json:"viral_score"`  // 0-100 AI-generated score
+	StartTime    float64    `json:"start_time"`  // seconds from original video
+	EndTime      float64    `json:"end_time"`    // seconds from original video
+	Duration     float64    `json:"duration"`    // clip duration in seconds
+	ViralScore   float64    `json:"viral_score"` // 0-100 AI-generated score
 	AIRationale  string     `gorm:"type:text" json:"ai_rationale"`
 	Hashtags     string     `gorm:"type:text" json:"hashtags"`      // JSON array
 	SuggestedFor string     `gorm:"type:text" json:"suggested_for"` // JSON array of platforms
@@ -161,18 +161,18 @@ const (
 // SocialAccount represents a connected social media account.
 type SocialAccount struct {
 	Base
-	UserID          uuid.UUID      `gorm:"type:uuid;not null;index" json:"user_id"`
-	Platform        SocialPlatform `gorm:"not null" json:"platform"`
-	PlatformUserID  string         `gorm:"not null" json:"platform_user_id"`
-	Username        string         `json:"username"`
-	DisplayName     string         `json:"display_name"`
-	AvatarURL       string         `json:"avatar_url"`
-	AccessToken     string         `json:"-"`
-	RefreshToken    string         `json:"-"`
-	TokenExpiresAt  *time.Time     `json:"token_expires_at,omitempty"`
-	IsActive        bool           `gorm:"default:true" json:"is_active"`
-	FollowersCount  int64          `json:"followers_count"`
-	LastSyncedAt    *time.Time     `json:"last_synced_at,omitempty"`
+	UserID         uuid.UUID      `gorm:"type:uuid;not null;index" json:"user_id"`
+	Platform       SocialPlatform `gorm:"not null" json:"platform"`
+	PlatformUserID string         `gorm:"not null" json:"platform_user_id"`
+	Username       string         `json:"username"`
+	DisplayName    string         `json:"display_name"`
+	AvatarURL      string         `json:"avatar_url"`
+	AccessToken    string         `json:"-"`
+	RefreshToken   string         `json:"-"`
+	TokenExpiresAt *time.Time     `json:"token_expires_at,omitempty"`
+	IsActive       bool           `gorm:"default:true" json:"is_active"`
+	FollowersCount int64          `json:"followers_count"`
+	LastSyncedAt   *time.Time     `json:"last_synced_at,omitempty"`
 
 	User User `gorm:"foreignKey:UserID" json:"user,omitempty"`
 }
@@ -213,37 +213,60 @@ type ScheduledPost struct {
 // ClipAnalytics stores performance metrics for published clips.
 type ClipAnalytics struct {
 	Base
-	ClipID       uuid.UUID      `gorm:"type:uuid;not null;index" json:"clip_id"`
-	PostID       *uuid.UUID     `gorm:"type:uuid;index" json:"post_id,omitempty"`
-	Platform     SocialPlatform `json:"platform"`
-	RecordedAt   time.Time      `gorm:"not null" json:"recorded_at"`
-	Views        int64          `json:"views"`
-	Likes        int64          `json:"likes"`
-	Comments     int64          `json:"comments"`
-	Shares       int64          `json:"shares"`
-	Saves        int64          `json:"saves"`
-	Reach        int64          `json:"reach"`
-	Impressions  int64          `json:"impressions"`
-	EngagementRate float64      `json:"engagement_rate"`
-	WatchTime    float64        `json:"watch_time"` // average watch time in seconds
+	ClipID         uuid.UUID      `gorm:"type:uuid;not null;index" json:"clip_id"`
+	PostID         *uuid.UUID     `gorm:"type:uuid;index" json:"post_id,omitempty"`
+	Platform       SocialPlatform `json:"platform"`
+	RecordedAt     time.Time      `gorm:"not null" json:"recorded_at"`
+	Views          int64          `json:"views"`
+	Likes          int64          `json:"likes"`
+	Comments       int64          `json:"comments"`
+	Shares         int64          `json:"shares"`
+	Saves          int64          `json:"saves"`
+	Reach          int64          `json:"reach"`
+	Impressions    int64          `json:"impressions"`
+	EngagementRate float64        `json:"engagement_rate"`
+	WatchTime      float64        `json:"watch_time"` // average watch time in seconds
 
-	Clip Clip          `gorm:"foreignKey:ClipID" json:"clip,omitempty"`
+	Clip Clip           `gorm:"foreignKey:ClipID" json:"clip,omitempty"`
 	Post *ScheduledPost `gorm:"foreignKey:PostID" json:"post,omitempty"`
 }
 
 // TrendingTopic stores trending topics discovered by the analytics worker.
 type TrendingTopic struct {
 	Base
-	Platform    SocialPlatform `gorm:"not null;index" json:"platform"`
-	Topic       string         `gorm:"not null" json:"topic"`
-	Hashtag     string         `json:"hashtag"`
-	Category    string         `json:"category"`
-	TrendScore  float64        `json:"trend_score"`
-	PostCount   int64          `json:"post_count"`
-	ViewCount   int64          `json:"view_count"`
-	GrowthRate  float64        `json:"growth_rate"` // percentage growth
-	Region      string         `json:"region"`
-	ExpiresAt   time.Time      `json:"expires_at"`
+	Platform   SocialPlatform `gorm:"not null;index" json:"platform"`
+	Topic      string         `gorm:"not null" json:"topic"`
+	Hashtag    string         `json:"hashtag"`
+	Category   string         `json:"category"`
+	TrendScore float64        `json:"trend_score"`
+	PostCount  int64          `json:"post_count"`
+	ViewCount  int64          `json:"view_count"`
+	GrowthRate float64        `json:"growth_rate"` // percentage growth
+	Region     string         `json:"region"`
+	ExpiresAt  time.Time      `json:"expires_at"`
+}
+
+// ViralOpportunity stores external trend signals collected by the worker.
+type ViralOpportunity struct {
+	Base
+	SourcePlatform  string    `gorm:"not null;uniqueIndex:idx_viral_opportunity_source,priority:1" json:"source_platform"`
+	ExternalVideoID string    `gorm:"not null;uniqueIndex:idx_viral_opportunity_source,priority:2" json:"external_video_id"`
+	ChannelID       string    `gorm:"not null" json:"channel_id"`
+	Title           string    `gorm:"type:text;not null" json:"title"`
+	Category        string    `json:"category"`
+	SourceQuery     string    `json:"source_query"`
+	Views           int64     `gorm:"not null;default:0" json:"views"`
+	PreviousViews   int64     `gorm:"not null;default:0" json:"previous_views"`
+	Likes           int64     `gorm:"not null;default:0" json:"likes"`
+	Comments        int64     `gorm:"not null;default:0" json:"comments"`
+	SubscriberCount int64     `gorm:"not null;default:0" json:"subscriber_count"`
+	PublishedAt     time.Time `gorm:"not null;index" json:"published_at"`
+	LastCollectedAt time.Time `gorm:"not null;index" json:"last_collected_at"`
+	ViewVelocity    float64   `gorm:"not null;default:0" json:"view_velocity"`
+	EngagementRate  float64   `gorm:"not null;default:0" json:"engagement_rate"`
+	OutlierScore    float64   `gorm:"not null;default:0" json:"outlier_score"`
+	GrowthScore     float64   `gorm:"not null;default:0" json:"growth_score"`
+	ViralScore      float64   `gorm:"not null;default:0;index" json:"viral_score"`
 }
 
 // HookDetection stores a detected hook moment from the V2 Hook Engine.
@@ -251,11 +274,11 @@ type HookDetection struct {
 	Base
 	VideoID        uuid.UUID `gorm:"type:uuid;not null;index" json:"video_id"`
 	UserID         uuid.UUID `gorm:"type:uuid;not null;index" json:"user_id"`
-	Start          float64   `gorm:"not null" json:"start"`           // seconds
-	End            float64   `gorm:"not null" json:"end"`             // seconds
-	HookType       string    `gorm:"not null;index" json:"type"`      // curiosity|emotion|storytelling|controversy|cta
-	Score          int       `gorm:"not null" json:"score"`           // 0-100
-	MatchedPattern string    `json:"matched_pattern"`                 // text fragment that triggered detection
+	Start          float64   `gorm:"not null" json:"start"`      // seconds
+	End            float64   `gorm:"not null" json:"end"`        // seconds
+	HookType       string    `gorm:"not null;index" json:"type"` // curiosity|emotion|storytelling|controversy|cta
+	Score          int       `gorm:"not null" json:"score"`      // 0-100
+	MatchedPattern string    `json:"matched_pattern"`            // text fragment that triggered detection
 
 	Video Video `gorm:"foreignKey:VideoID" json:"video,omitempty"`
 	User  User  `gorm:"foreignKey:UserID"  json:"user,omitempty"`

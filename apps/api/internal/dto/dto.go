@@ -47,14 +47,14 @@ type AuthResponse struct {
 // =============================================================================
 
 type UserResponse struct {
-	ID              uuid.UUID              `json:"id"`
-	Name            string                 `json:"name"`
-	Email           string                 `json:"email"`
-	AvatarURL       string                 `json:"avatar_url"`
-	IsEmailVerified bool                   `json:"is_email_verified"`
+	ID              uuid.UUID               `json:"id"`
+	Name            string                  `json:"name"`
+	Email           string                  `json:"email"`
+	AvatarURL       string                  `json:"avatar_url"`
+	IsEmailVerified bool                    `json:"is_email_verified"`
 	Tier            models.SubscriptionTier `json:"tier"`
-	CreatedAt       time.Time              `json:"created_at"`
-	LastLoginAt     *time.Time             `json:"last_login_at,omitempty"`
+	CreatedAt       time.Time               `json:"created_at"`
+	LastLoginAt     *time.Time              `json:"last_login_at,omitempty"`
 }
 
 type UpdateUserRequest struct {
@@ -237,17 +237,17 @@ type ScheduledPostResponse struct {
 // =============================================================================
 
 type AnalyticsSummaryResponse struct {
-	TotalViews      int64         `json:"total_views"`
-	TotalLikes      int64         `json:"total_likes"`
-	TotalComments   int64         `json:"total_comments"`
-	TotalShares     int64         `json:"total_shares"`
-	AvgEngagement   float64       `json:"avg_engagement_rate"`
-	TopClip         *ClipResponse `json:"top_clip,omitempty"`
-	TopPlatform     string        `json:"top_platform"`
-	PublishedClips  int           `json:"published_clips"`
+	TotalViews     int64         `json:"total_views"`
+	TotalLikes     int64         `json:"total_likes"`
+	TotalComments  int64         `json:"total_comments"`
+	TotalShares    int64         `json:"total_shares"`
+	AvgEngagement  float64       `json:"avg_engagement_rate"`
+	TopClip        *ClipResponse `json:"top_clip,omitempty"`
+	TopPlatform    string        `json:"top_platform"`
+	PublishedClips int           `json:"published_clips"`
 	// ClipsPublished is an alias for PublishedClips kept for backward compatibility.
-	ClipsPublished  int           `json:"clips_published"`
-	ScheduledPosts  int           `json:"scheduled_posts"`
+	ClipsPublished int `json:"clips_published"`
+	ScheduledPosts int `json:"scheduled_posts"`
 }
 
 // ClipAnalyticsResponse represents per-platform analytics for a single clip.
@@ -279,6 +279,45 @@ type TrendingTopicResponse struct {
 	PostCount  int64                 `json:"post_count"`
 	GrowthRate float64               `json:"growth_rate"`
 	ExpiresAt  time.Time             `json:"expires_at"`
+}
+
+type ViralOpportunityResponse struct {
+	ID              uuid.UUID `json:"id"`
+	SourcePlatform  string    `json:"source_platform"`
+	ExternalVideoID string    `json:"external_video_id"`
+	ChannelID       string    `json:"channel_id"`
+	Title           string    `json:"title"`
+	Category        string    `json:"category"`
+	SourceQuery     string    `json:"source_query"`
+	Views           int64     `json:"views"`
+	PreviousViews   int64     `json:"previous_views"`
+	Likes           int64     `json:"likes"`
+	Comments        int64     `json:"comments"`
+	SubscriberCount int64     `json:"subscriber_count"`
+	PublishedAt     time.Time `json:"published_at"`
+	LastCollectedAt time.Time `json:"last_collected_at"`
+	ViewVelocity    float64   `json:"view_velocity"`
+	EngagementRate  float64   `json:"engagement_rate"`
+	OutlierScore    float64   `json:"outlier_score"`
+	GrowthScore     float64   `json:"growth_score"`
+	ViralScore      float64   `json:"viral_score"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type ViralOpportunityListResponse struct {
+	Data       []ViralOpportunityResponse `json:"data"`
+	Total      int64                      `json:"total"`
+	Page       int                        `json:"page"`
+	Limit      int                        `json:"limit"`
+	TotalPages int                        `json:"total_pages"`
+}
+
+type ViralOpportunityRecommendationResponse struct {
+	Opportunity         ViralOpportunityResponse `json:"opportunity"`
+	RecommendationScore float64                  `json:"recommendation_score"`
+	Reasons             []string                 `json:"reasons"`
+	MatchedProfiles     []string                 `json:"matched_profiles"`
 }
 
 // =============================================================================
@@ -387,15 +426,15 @@ type ClipV2HookDetection struct {
 // ClipV2GenerateRequest is the request body for POST /api/v1/videos/:id/clips/v2/generate.
 type ClipV2GenerateRequest struct {
 	Segments     []ClipV2Segment `json:"segments" validate:"required,min=1"`
-	ProfileType  string          `json:"profile_type"`  // gaming|comedy|education|politics|podcast|general
+	ProfileType  string          `json:"profile_type"`   // gaming|comedy|education|politics|podcast|general
 	MinClipScore int             `json:"min_clip_score"` // default 50
 	MaxClips     int             `json:"max_clips"`      // default 10
 }
 
 // ClipV2ResultItem is a single clip candidate returned from the V2 engine.
 type ClipV2ResultItem struct {
-	Start          string  `json:"start"`           // HH:MM:SS
-	End            string  `json:"end"`             // HH:MM:SS
+	Start          string  `json:"start"` // HH:MM:SS
+	End            string  `json:"end"`   // HH:MM:SS
 	StartSeconds   float64 `json:"start_seconds"`
 	EndSeconds     float64 `json:"end_seconds"`
 	Score          int     `json:"score"`

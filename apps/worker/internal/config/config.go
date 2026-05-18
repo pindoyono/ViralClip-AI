@@ -16,6 +16,7 @@ type Config struct {
 	AI       AIConfig
 	Storage  StorageConfig
 	Log      LogConfig
+	YouTube  YouTubeConfig
 }
 
 type AppConfig struct {
@@ -57,6 +58,14 @@ type LogConfig struct {
 	Format string
 }
 
+// YouTubeConfig holds trend collection settings.
+type YouTubeConfig struct {
+	DataAPIKey string
+	RegionCode string
+	MaxResults int
+	Lookback   time.Duration
+}
+
 // Load reads config from environment variables.
 func Load() (*Config, error) {
 	cfg := &Config{
@@ -91,6 +100,12 @@ func Load() (*Config, error) {
 		Log: LogConfig{
 			Level:  getEnv("LOG_LEVEL", "info"),
 			Format: getEnv("LOG_FORMAT", "json"),
+		},
+		YouTube: YouTubeConfig{
+			DataAPIKey: getEnv("YOUTUBE_DATA_API_KEY", ""),
+			RegionCode: getEnv("YOUTUBE_REGION_CODE", "US"),
+			MaxResults: getIntEnv("YOUTUBE_MAX_RESULTS", 10),
+			Lookback:   getDurationEnv("YOUTUBE_LOOKBACK_WINDOW", 168*time.Hour),
 		},
 	}
 
