@@ -111,6 +111,10 @@ export default function VideoDetailPage() {
 
   const clips = (clipsData as { data?: unknown[] } | undefined)?.data ?? [];
 
+  // hasTranscript is true when the video has a transcribed text that can be
+  // used as input to the V2 clip generation pipeline.
+  const hasTranscript = !!(video.transcript && video.transcript.trim().length > 0);
+
   return (
     <div className="space-y-6">
       {/* Breadcrumb */}
@@ -301,9 +305,25 @@ export default function VideoDetailPage() {
 
             <button
               onClick={() => {
+                if (!hasTranscript) return;
+                // Split the stored transcript into ~30-second segments for the
+                // V2 engine. Each line of the stored transcript becomes one
+                // segment; timestamps are approximated uniformly across the
+                // video duration.
+                const lines = (video.transcript as string)
+                  .split(/\n+/)
+                  .map((t) => t.trim())
+                  .filter(Boolean);
+                const totalDuration = video.duration ?? 60;
+                const segDuration = lines.length > 0 ? totalDuration / lines.length : totalDuration;
+                const segments = lines.map((text, i) => ({
+                  text,
+                  start: Math.round(i * segDuration * 10) / 10,
+                  end: Math.round((i + 1) * segDuration * 10) / 10,
+                }));
                 generateClipsV2.mutate(
                   {
-                    segments: [{ text: video.transcript ?? video.title, start: 0, end: video.duration ?? 60 }],
+                    segments,
                     profile_type: profileType,
                     min_clip_score: 50,
                     max_clips: 10,
@@ -316,8 +336,9 @@ export default function VideoDetailPage() {
                   }
                 );
               }}
-              disabled={generateClipsV2.isPending}
-              className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 px-4 py-2 rounded-lg text-white text-sm font-medium transition-colors shrink-0"
+              disabled={generateClipsV2.isPending || !hasTranscript}
+              title={!hasTranscript ? "Process the video first to generate a transcript" : undefined}
+              className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 rounded-lg text-white text-sm font-medium transition-colors shrink-0"
             >
               {generateClipsV2.isPending ? "Generating…" : "Generate V2 Clips"}
             </button>
@@ -345,7 +366,9 @@ export default function VideoDetailPage() {
 
           {v2Clips.length === 0 && !generateClipsV2.isPending && !generateClipsV2.isError && (
             <p className="text-xs text-slate-500 text-center py-2">
-              Select a content profile and click <em>Generate V2 Clips</em> to run the Dynamic Clip Engine.
+              {hasTranscript
+                ? <>Select a content profile and click <em>Generate V2 Clips</em> to run the Dynamic Clip Engine.</>
+                : "Process the video with AI first to generate a transcript, then you can run V2 Clip Generation."}
             </p>
           )}
         </div>

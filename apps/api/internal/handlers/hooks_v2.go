@@ -73,8 +73,13 @@ func (h *HookHandlerV2) Detect(c *fiber.Ctx) error {
 	if req.MinScore < 0 || req.MinScore > 100 {
 		return utils.BadRequest(c, "min_score must be between 0 and 100")
 	}
+	// Apply default only when the field was not set by the client (i.e. zero-
+	// value AND not explicitly sent).  Since JSON zero values are
+	// indistinguishable from absent values with Go's int type, we treat 0 as
+	// "not provided" and substitute a sensible default of 50.  Clients that
+	// genuinely want all hooks regardless of score should send min_score=1.
 	if req.MinScore == 0 {
-		req.MinScore = 50 // sensible default
+		req.MinScore = 50
 	}
 
 	// Build the payload for the AI service.
