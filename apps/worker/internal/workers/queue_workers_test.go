@@ -574,3 +574,114 @@ func TestFullPipeline_TranscriptToUpload(t *testing.T) {
 	db.First(&vid, "id = ?", "vid-e2e")
 	assert.Equal(t, VideoStatusCompleted, vid.Status)
 }
+
+// ---------------------------------------------------------------------------
+// StatusPublisher tests
+// ---------------------------------------------------------------------------
+
+// TestStatusPublisher_Publish_WritesToPubSub verifies that Publish sends a
+// message to the expected Redis Pub/Sub channel and that the payload can be
+// decoded back into a StageChangeEvent.
+func TestStatusPublisher_Publish_WritesToPubSub(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	t.Cleanup(mr.Close)
+
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+
+	// Subscribe before publishing so we can receive the message.
+	pubsub := rdb.Subscribe(context.Background(), VideoStatusChannel+"vid-pub-1")
+	defer pubsub.Close()
+
+	pub := NewStatusPublisher(rdb)
+	pub.Publish(context.Background(), StageChangeEvent{
+		VideoID:     "vid-pub-1",
+		UserID:      "user-1",
+		Stage:       "transcript",
+		Status:      "processing",
+		VideoStatus: "processing",
+	})
+
+	// Wait for the message.
+	msg := <-pubsub.Channel()
+	assert.Equal(t, VideoStatusChannel+"vid-pub-1", msg.Channel)
+
+	var got StageChangeEvent
+	require.NoError(t, json.Unmarshal([]byte(msg.Payload), &got))
+	assert.Equal(t, "vid-pub-1", got.VideoID)
+	assert.Equal(t, "transcript", got.Stage)
+	assert.Equal(t, "processing", got.Status)
+	assert.False(t, got.Timestamp.IsZero())
+}
+
+// TestStatusPublisher_Publish_NilRedis_NoOp ensures Publish is a no-op when
+// the publisher was created with a nil Redis client.
+func TestStatusPublisher_Publish_NilRedis_NoOp(t *testing.T) {
+	pub := NewStatusPublisher(nil)
+	// Must not panic.
+	assert.NotPanics(t, func() {
+		pub.Publish(context.Background(), StageChangeEvent{
+			VideoID: "vid-nil", Stage: "clip", Status: "processing",
+		})
+	})
+}
+
+// TestTranscriptWorker_WithStatusPublisher_PublishesEvents verifies that the
+// TranscriptWorker emits start and done events when a job is processed
+// successfully.
+func TestTranscriptWorker_WithStatusPublisher_PublishesEvents(t *testing.T) {
+	db := setupQueueWorkerDB(t)
+	qCli, _ := newTestQueueClient(t)
+	seedVideoForQueue(db, "vid-pub-events", VideoStatusPending)
+
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	t.Cleanup(mr.Close)
+
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	pub := NewStatusPublisher(rdb)
+
+	// Subscribe to all events for this video.
+	ps := rdb.PSubscribe(context.Background(), VideoStatusChannel+"*")
+	defer ps.Close()
+	ch := ps.Channel()
+
+	mockAI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer mockAI.Close()
+
+	w := NewTranscriptWorker(db, qCli, mockAI.URL, 3).WithStatusPublisher(pub)
+	job := &queue.Job{
+		ID: "vid-pub-events", Type: queue.JobTypeTranscript,
+		VideoID: "vid-pub-events", UserID: "user-1",
+		StoragePath: "/storage/v.mp4", MaxRetries: 3,
+	}
+
+	w.processJob(context.Background(), job)
+
+	// Collect published events (expect at least 2: processing + done).
+	var events []StageChangeEvent
+	timeout := time.After(2 * time.Second)
+collect:
+	for {
+		select {
+		case msg := <-ch:
+			var e StageChangeEvent
+			if jsonErr := json.Unmarshal([]byte(msg.Payload), &e); jsonErr == nil {
+				events = append(events, e)
+			}
+			if len(events) >= 2 {
+				break collect
+			}
+		case <-timeout:
+			break collect
+		}
+	}
+
+	require.GreaterOrEqual(t, len(events), 2, "expected at least 2 stage events")
+	assert.Equal(t, "transcript", events[0].Stage)
+	assert.Equal(t, "processing", events[0].Status)
+	assert.Equal(t, "transcript", events[1].Stage)
+	assert.Equal(t, "done", events[1].Status)
+}

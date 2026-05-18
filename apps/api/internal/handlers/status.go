@@ -277,12 +277,32 @@ func (b *StatusBroadcaster) Run(ctx context.Context) {
 	}
 }
 
+// validPipelineStages is the set of stage names that workers are allowed to
+// publish. Events with unknown stage names are silently dropped to avoid
+// propagating invalid data to clients.
+var validPipelineStages = map[string]dto.PipelineStage{
+	"transcript": dto.PipelineStageTranscript,
+	"clip":       dto.PipelineStageClip,
+	"subtitle":   dto.PipelineStageSubtitle,
+	"upload":     dto.PipelineStageUpload,
+}
+
 // handlePubSubMessage decodes a stage-change event and sends it to the
 // connected WebSocket client that owns the video.
 func (b *StatusBroadcaster) handlePubSubMessage(ctx context.Context, payload string) {
 	var event StageChangeEvent
 	if err := json.Unmarshal([]byte(payload), &event); err != nil {
 		log.Warn().Err(err).Str("payload", payload).Msg("StatusBroadcaster: failed to decode event")
+		return
+	}
+
+	// Validate that stage is a known pipeline stage before converting.
+	pipelineStage, ok := validPipelineStages[event.Stage]
+	if !ok {
+		log.Warn().
+			Str("stage", event.Stage).
+			Str("video_id", event.VideoID).
+			Msg("StatusBroadcaster: unknown pipeline stage in event, dropping")
 		return
 	}
 
@@ -305,7 +325,7 @@ func (b *StatusBroadcaster) handlePubSubMessage(ctx context.Context, payload str
 			VideoID:      event.VideoID,
 			VideoStatus:  event.VideoStatus,
 			JobStatus:    event.Stage + ":" + event.Status,
-			CurrentStage: dto.PipelineStage(event.Stage),
+			CurrentStage: pipelineStage,
 			Stages:       buildJobStatusResponse(event.VideoID, event.VideoStatus, event.Stage+":"+event.Status).Stages,
 		},
 	}
