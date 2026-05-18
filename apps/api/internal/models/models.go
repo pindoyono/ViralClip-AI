@@ -245,3 +245,18 @@ type TrendingTopic struct {
 	Region      string         `json:"region"`
 	ExpiresAt   time.Time      `json:"expires_at"`
 }
+
+// HookDetection stores a detected hook moment from the V2 Hook Engine.
+type HookDetection struct {
+	Base
+	VideoID        uuid.UUID `gorm:"type:uuid;not null;index" json:"video_id"`
+	UserID         uuid.UUID `gorm:"type:uuid;not null;index" json:"user_id"`
+	Start          float64   `gorm:"not null" json:"start"`           // seconds
+	End            float64   `gorm:"not null" json:"end"`             // seconds
+	HookType       string    `gorm:"not null;index" json:"type"`      // curiosity|emotion|storytelling|controversy|cta
+	Score          int       `gorm:"not null" json:"score"`           // 0-100
+	MatchedPattern string    `json:"matched_pattern"`                 // text fragment that triggered detection
+
+	Video Video `gorm:"foreignKey:VideoID" json:"video,omitempty"`
+	User  User  `gorm:"foreignKey:UserID"  json:"user,omitempty"`
+}

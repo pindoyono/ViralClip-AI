@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api";
-import type { ClipAnalytics } from "@/types";
+import type { ClipAnalytics, TrendingTopic } from "@/types";
 
 interface AnalyticsSummary {
   total_views: number;
@@ -29,5 +29,16 @@ export function useClipAnalytics(clipId: string) {
       return data.data;
     },
     enabled: !!clipId,
+  });
+}
+
+export function useTrendingTopics(platform?: string) {
+  return useQuery({
+    queryKey: ["trending", platform ?? "all"],
+    queryFn: async () => {
+      const url = platform ? `/trending?platform=${encodeURIComponent(platform)}` : "/trending";
+      const { data } = await apiClient.get<{ data: TrendingTopic[] }>(url);
+      return data.data;
+    },
   });
 }

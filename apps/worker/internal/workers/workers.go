@@ -61,6 +61,44 @@ type Clip struct {
 
 func (Clip) TableName() string { return "clips" }
 
+// ScheduledPost is a minimal worker-side representation of a scheduled post.
+type ScheduledPost struct {
+	ID             string    `gorm:"primaryKey" json:"id"`
+	ClipID         string    `json:"clip_id"`
+	UserID         string    `json:"user_id"`
+	SocialAccountID string   `json:"social_account_id"`
+	Platform       string    `json:"platform"`
+	Caption        string    `json:"caption"`
+	Status         string    `json:"status"`
+	PlatformPostID string    `json:"platform_post_id"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+func (ScheduledPost) TableName() string { return "scheduled_posts" }
+
+// ClipAnalytics is a minimal worker-side representation of clip performance metrics.
+type ClipAnalytics struct {
+	ID             string    `gorm:"primaryKey" json:"id"`
+	ClipID         string    `gorm:"index;not null" json:"clip_id"`
+	PostID         string    `gorm:"index" json:"post_id"`
+	Platform       string    `json:"platform"`
+	RecordedAt     time.Time `json:"recorded_at"`
+	Views          int64     `json:"views"`
+	Likes          int64     `json:"likes"`
+	Comments       int64     `json:"comments"`
+	Shares         int64     `json:"shares"`
+	Saves          int64     `json:"saves"`
+	Reach          int64     `json:"reach"`
+	Impressions    int64     `json:"impressions"`
+	EngagementRate float64   `json:"engagement_rate"`
+	WatchTime      float64   `json:"watch_time"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+func (ClipAnalytics) TableName() string { return "clip_analytics" }
+
 // newUUID generates a random UUID v4 string without external dependencies.
 func newUUID() string {
 	b := make([]byte, 16)

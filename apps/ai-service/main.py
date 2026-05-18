@@ -9,6 +9,8 @@ from loguru import logger
 
 from app.config import settings
 from app.routers import transcript, hooks, clips, subtitles, metadata, categories, process
+from app.routers import hooks_v2
+from app.routers import clips_v2
 
 # Configure loguru
 logger.remove()
@@ -80,3 +82,5 @@ app.include_router(subtitles.router, prefix="/api/v1")
 app.include_router(metadata.router, prefix="/api/v1")
 app.include_router(categories.router, prefix="/api/v1")
 app.include_router(process.router)  # /process/* — no extra prefix; router itself declares /process
+app.include_router(hooks_v2.router, prefix="/api/v1")
+app.include_router(clips_v2.router, prefix="/api/v1")

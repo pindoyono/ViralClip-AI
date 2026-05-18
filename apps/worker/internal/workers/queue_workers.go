@@ -539,12 +539,61 @@ func (w *QueueAnalyticsWorker) processJob(ctx context.Context, job *queue.Job) {
 
 	_ = w.queueCli.TrackStatus(ctx, job.ID, string(queue.JobStatusProcessing), queue.DefaultJobTTL)
 
-	// Analytics events are processed by reading the clip/post ID from metadata
-	// and updating the ClipAnalytics table with the latest platform metrics.
-	// Actual platform API calls will be implemented in Task 6 (Performance
-	// Learning Engine). Here we acknowledge the job and mark it done so the
-	// queue does not stall.
+	clipID := job.Metadata["clip_id"]
+	postID := job.Metadata["post_id"]
+
+	if clipID == "" {
+		log.Warn().Str("job_id", job.ID).Msg("QueueAnalyticsWorker: missing clip_id in metadata, skipping")
+		_ = w.queueCli.TrackStatus(ctx, job.ID, string(queue.JobStatusDone), queue.DefaultJobTTL)
+		return
+	}
+
+	// Resolve the platform from the scheduled post when post_id is provided.
+	platform := job.Metadata["platform"]
+	if platform == "" && postID != "" {
+		var post ScheduledPost
+		if err := w.db.WithContext(ctx).Where("id = ?", postID).First(&post).Error; err == nil {
+			platform = post.Platform
+		}
+	}
+	if platform == "" {
+		platform = "unknown"
+	}
+
+	// Upsert a ClipAnalytics snapshot for this sync event.
+	// In production, views/likes/etc. would be fetched from the platform API.
+	// Here we record a zero-value snapshot so the row exists and can be updated
+	// once real API credentials are wired in.
+	record := ClipAnalytics{
+		ID:         newUUID(),
+		ClipID:     clipID,
+		PostID:     postID,
+		Platform:   platform,
+		RecordedAt: time.Now().UTC(),
+		UpdatedAt:  time.Now().UTC(),
+		CreatedAt:  time.Now().UTC(),
+	}
+
+	if err := w.db.WithContext(ctx).
+		Where("clip_id = ? AND post_id = ? AND platform = ?", clipID, postID, platform).
+		Assign(ClipAnalytics{
+			RecordedAt: record.RecordedAt,
+			UpdatedAt:  record.UpdatedAt,
+		}).
+		FirstOrCreate(&record).Error; err != nil {
+		log.Error().Err(err).
+			Str("job_id", job.ID).
+			Str("clip_id", clipID).
+			Msg("QueueAnalyticsWorker: failed to upsert ClipAnalytics record")
+		_ = w.queueCli.TrackStatus(ctx, job.ID, string(queue.JobStatusFailed), queue.DefaultJobTTL)
+		return
+	}
+
 	_ = w.queueCli.TrackStatus(ctx, job.ID, string(queue.JobStatusDone), queue.DefaultJobTTL)
 
-	log.Info().Str("job_id", job.ID).Msg("QueueAnalyticsWorker: job done")
+	log.Info().
+		Str("job_id", job.ID).
+		Str("clip_id", clipID).
+		Str("platform", platform).
+		Msg("QueueAnalyticsWorker: analytics record upserted, job done")
 }

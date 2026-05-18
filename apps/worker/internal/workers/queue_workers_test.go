@@ -29,7 +29,7 @@ func setupQueueWorkerDB(t *testing.T) *gorm.DB {
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&Video{}, &Clip{}))
+	require.NoError(t, db.AutoMigrate(&Video{}, &Clip{}, &ScheduledPost{}, &ClipAnalytics{}))
 	return db
 }
 
@@ -380,6 +380,92 @@ func TestQueueAnalyticsWorker_ProcessJob_DoesNotPanic(t *testing.T) {
 	})
 
 	status, err := qCli.GetStatus(ctx, "job-analytics-1")
+	require.NoError(t, err)
+	assert.Equal(t, string(queue.JobStatusDone), status)
+}
+
+func TestQueueAnalyticsWorker_ProcessJob_CreatesAnalyticsRecord(t *testing.T) {
+	db := setupQueueWorkerDB(t)
+	qCli, _ := newTestQueueClient(t)
+
+	w := NewQueueAnalyticsWorker(db, qCli, 3)
+	job := &queue.Job{
+		ID:      "job-analytics-2",
+		Type:    queue.JobTypeAnalytics,
+		VideoID: "vid-2",
+		UserID:  "user-2",
+		Metadata: map[string]string{
+			"clip_id":  "clip-abc",
+			"post_id":  "post-xyz",
+			"platform": "tiktok",
+		},
+		MaxRetries: 3,
+	}
+
+	ctx := context.Background()
+	w.processJob(ctx, job)
+
+	status, err := qCli.GetStatus(ctx, "job-analytics-2")
+	require.NoError(t, err)
+	assert.Equal(t, string(queue.JobStatusDone), status)
+
+	var record ClipAnalytics
+	err = db.Where("clip_id = ? AND platform = ?", "clip-abc", "tiktok").First(&record).Error
+	require.NoError(t, err)
+	assert.Equal(t, "clip-abc", record.ClipID)
+	assert.Equal(t, "post-xyz", record.PostID)
+	assert.Equal(t, "tiktok", record.Platform)
+}
+
+func TestQueueAnalyticsWorker_ProcessJob_ResolvesPlatformFromPost(t *testing.T) {
+	db := setupQueueWorkerDB(t)
+	qCli, _ := newTestQueueClient(t)
+
+	// Seed a scheduled post so the worker can resolve platform from it.
+	post := ScheduledPost{ID: "post-resolved", ClipID: "clip-def", Platform: "youtube", Status: "published"}
+	require.NoError(t, db.Create(&post).Error)
+
+	w := NewQueueAnalyticsWorker(db, qCli, 3)
+	job := &queue.Job{
+		ID:   "job-analytics-3",
+		Type: queue.JobTypeAnalytics,
+		Metadata: map[string]string{
+			"clip_id": "clip-def",
+			"post_id": "post-resolved",
+			// platform intentionally omitted — should be resolved from post
+		},
+		MaxRetries: 3,
+	}
+
+	ctx := context.Background()
+	w.processJob(ctx, job)
+
+	var record ClipAnalytics
+	err := db.Where("clip_id = ? AND post_id = ?", "clip-def", "post-resolved").First(&record).Error
+	require.NoError(t, err)
+	assert.Equal(t, "youtube", record.Platform)
+}
+
+func TestQueueAnalyticsWorker_ProcessJob_SkipsWhenNoClipID(t *testing.T) {
+	db := setupQueueWorkerDB(t)
+	qCli, _ := newTestQueueClient(t)
+
+	w := NewQueueAnalyticsWorker(db, qCli, 3)
+	job := &queue.Job{
+		ID:         "job-analytics-nodata",
+		Type:       queue.JobTypeAnalytics,
+		MaxRetries: 3,
+		// No Metadata — no clip_id
+	}
+
+	ctx := context.Background()
+	assert.NotPanics(t, func() { w.processJob(ctx, job) })
+
+	var count int64
+	db.Model(&ClipAnalytics{}).Count(&count)
+	assert.Equal(t, int64(0), count)
+
+	status, err := qCli.GetStatus(ctx, "job-analytics-nodata")
 	require.NoError(t, err)
 	assert.Equal(t, string(queue.JobStatusDone), status)
 }
