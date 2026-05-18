@@ -322,3 +322,104 @@ class ClipGenerateV2Response(BaseModel):
     profile_type: str
     clips: List[ClipV2ResultSchema]
     total: int
+
+
+# ---------------------------------------------------------------------------
+# Audio-Aware Hook Engine V3 schemas
+# ---------------------------------------------------------------------------
+
+class PauseType(str, Enum):
+    DRAMATIC = "dramatic"
+    LONG = "long"
+    EMPHASIS = "emphasis"
+
+
+class IntensityLevel(str, Enum):
+    LOUD = "loud"
+    NORMAL = "normal"
+    QUIET = "quiet"
+
+
+class SpeechRate(str, Enum):
+    FAST = "fast"
+    SLOW = "slow"
+    NORMAL = "normal"
+    SUDDEN_CHANGE = "sudden_change"
+
+
+class AudioEmotionLabel(str, Enum):
+    EXCITEMENT = "excitement"
+    ANGER = "anger"
+    SURPRISE = "surprise"
+    SADNESS = "sadness"
+    NEUTRAL = "neutral"
+
+
+class PauseSignal(BaseModel):
+    """Detected speech pause before a transcript segment."""
+    start: float = Field(..., description="Pause start time in seconds")
+    end: float = Field(..., description="Pause end time in seconds")
+    duration: float = Field(..., description="Pause length in seconds")
+    pause_type: PauseType = Field(..., description="Pause classification")
+
+
+class IntensitySignal(BaseModel):
+    """Voice intensity characteristics for a transcript segment."""
+    rms_db: float = Field(..., description="Mean RMS of the segment in dBFS")
+    rms_relative: float = Field(..., description="Segment RMS / track baseline RMS")
+    intensity_level: IntensityLevel = Field(..., description="Intensity classification")
+    has_sudden_increase: bool = Field(..., description="True if energy spikes within segment")
+    is_emotional: bool = Field(..., description="True if loud and energetically variable")
+
+
+class SpeechPatternSignal(BaseModel):
+    """Speech rate characteristics for a transcript segment."""
+    words_per_second: float = Field(..., description="Word rate for this segment")
+    speech_rate: SpeechRate = Field(..., description="Speech rate classification")
+    rate_deviation: float = Field(..., description="Deviation from mean in standard deviations")
+
+
+class SegmentAudioAnalysis(BaseModel):
+    """Complete audio analysis result for a single transcript segment."""
+    start: float
+    end: float
+    pre_pause: Optional[PauseSignal] = Field(default=None, description="Pause before this segment")
+    intensity: IntensitySignal
+    speech_pattern: SpeechPatternSignal
+    audio_emotion: AudioEmotionLabel
+    audio_score: int = Field(..., ge=0, le=100, description="Combined audio signal score 0–100")
+    audio_hook_type: Optional[str] = Field(
+        default=None,
+        description="Hook type suggested by audio signals",
+    )
+
+
+class AudioAwareHookDetectionRequest(BaseModel):
+    """Request body for the V3 audio-aware hook detection endpoint."""
+    video_id: str
+    segments: List[TranscriptSegmentInput] = Field(
+        ..., min_length=1, description="Transcript segments with timestamps"
+    )
+    audio_storage_path: Optional[str] = Field(
+        default=None,
+        description=(
+            "Absolute path to the audio/video file for audio signal analysis. "
+            "When omitted, falls back to text-only detection (same as V2)."
+        ),
+    )
+    min_score: int = Field(default=50, ge=0, le=100, description="Minimum score to include")
+
+
+class AudioAwareHookDetectionResponse(BaseModel):
+    """Response from the V3 audio-aware hook detection endpoint."""
+    video_id: str
+    hooks: List[HookDetectionResult]
+    total: int = Field(..., description="Total number of hooks detected")
+    audio_analysis: List[SegmentAudioAnalysis] = Field(
+        default_factory=list,
+        description="Per-segment audio analysis (empty when no audio path provided)",
+    )
+    audio_enabled: bool = Field(
+        default=False,
+        description="True when audio signals were incorporated into scores",
+    )
