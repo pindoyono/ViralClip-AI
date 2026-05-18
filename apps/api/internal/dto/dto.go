@@ -321,3 +321,44 @@ type APIError struct {
 	Message string            `json:"message"`
 	Details map[string]string `json:"details,omitempty"`
 }
+
+// =============================================================================
+// Hook Detection V2 DTOs
+// =============================================================================
+
+// HookDetectionSegmentRequest is a single transcript segment sent to the
+// V2 detection endpoint.
+type HookDetectionSegmentRequest struct {
+	Text  string  `json:"text"`
+	Start float64 `json:"start"`
+	End   float64 `json:"end"`
+}
+
+// HookDetectRequest is the request body for POST /api/v1/videos/:id/hooks/detect.
+type HookDetectRequest struct {
+	Segments []HookDetectionSegmentRequest `json:"segments" validate:"required,min=1"`
+	MinScore int                           `json:"min_score"` // default 50
+}
+
+// HookDetectionResultResponse is a single detected hook returned to the client.
+type HookDetectionResultResponse struct {
+	Start          float64 `json:"start"`
+	End            float64 `json:"end"`
+	Type           string  `json:"type"`
+	Score          int     `json:"score"`
+	MatchedPattern string  `json:"matched_pattern"`
+}
+
+// HookDetectResponse is the response body for the detect endpoint.
+type HookDetectResponse struct {
+	VideoID string                        `json:"video_id"`
+	Hooks   []HookDetectionResultResponse `json:"hooks"`
+	Total   int                           `json:"total"`
+}
+
+// HookListResponse is the response body for listing stored detections.
+type HookListResponse struct {
+	VideoID string                        `json:"video_id"`
+	Hooks   []HookDetectionResultResponse `json:"hooks"`
+	Total   int                           `json:"total"`
+}

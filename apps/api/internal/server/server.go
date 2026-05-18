@@ -151,6 +151,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		&models.ScheduledPost{},
 		&models.ClipAnalytics{},
 		&models.TrendingTopic{},
+		&models.HookDetection{},
 	); err != nil {
 		return nil, fmt.Errorf("auto-migrating models: %w", err)
 	}

@@ -225,3 +225,47 @@ class ProcessVideoResponse(BaseModel):
     fps: float
     has_audio: bool
     thumbnail_path: str
+
+
+# ---------------------------------------------------------------------------
+# Hook Engine V2 schemas
+# ---------------------------------------------------------------------------
+
+class HookTypeV2(str, Enum):
+    CURIOSITY = "curiosity"
+    EMOTION = "emotion"
+    STORYTELLING = "storytelling"
+    CONTROVERSY = "controversy"
+    CTA = "cta"
+
+
+class TranscriptSegmentInput(BaseModel):
+    """A single transcript segment with timing information."""
+    text: str
+    start: float = Field(..., ge=0.0, description="Segment start time in seconds")
+    end: float = Field(..., gt=0.0, description="Segment end time in seconds")
+
+
+class HookDetectionResult(BaseModel):
+    """A detected hook moment within a transcript."""
+    start: float = Field(..., description="Segment start time in seconds")
+    end: float = Field(..., description="Segment end time in seconds")
+    type: str = Field(..., description="Hook category (curiosity/emotion/storytelling/controversy/cta)")
+    score: int = Field(..., ge=0, le=100, description="Hook strength score 0–100")
+    matched_pattern: str = Field(default="", description="The specific text fragment that triggered detection")
+
+
+class HookDetectionRequest(BaseModel):
+    """Request body for the V2 hook detection endpoint."""
+    video_id: str
+    segments: List[TranscriptSegmentInput] = Field(
+        ..., min_length=1, description="Transcript segments with timestamps"
+    )
+    min_score: int = Field(default=50, ge=0, le=100, description="Minimum score to include in results")
+
+
+class HookDetectionResponse(BaseModel):
+    """Response from the V2 hook detection endpoint."""
+    video_id: str
+    hooks: List[HookDetectionResult]
+    total: int = Field(..., description="Total number of hooks detected")

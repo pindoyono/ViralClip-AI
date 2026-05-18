@@ -52,6 +52,7 @@ func Register(srv *server.Server) {
 	analyticsHandler := handlers.NewAnalyticsHandler(srv.DB)
 	trendingHandler := handlers.NewTrendingHandler(srv.DB)
 	contentProfileHandler := handlers.NewContentProfileHandler(srv.DB)
+	hookHandlerV2 := handlers.NewHookHandlerV2(srv.DB, srv.Config)
 
 	// Health check
 	app.Get("/health", func(c *fiber.Ctx) error {
@@ -94,6 +95,10 @@ func Register(srv *server.Server) {
 	videos.Delete("/:id", videoHandler.Delete)
 	videos.Post("/:id/process", videoHandler.ProcessVideo)
 	videos.Get("/:videoId/clips", clipHandler.GetByVideo)
+
+	// Hook Detection V2 routes
+	videos.Post("/:videoId/hooks/detect", hookHandlerV2.Detect)
+	videos.Get("/:videoId/hooks", hookHandlerV2.List)
 
 	// Clip routes
 	clips := v1.Group("/clips")
