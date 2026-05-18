@@ -2,7 +2,9 @@ package trends
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -26,7 +28,7 @@ type TrendCollectorWorker struct {
 
 // ViralOpportunity is the worker-side DB representation.
 type ViralOpportunity struct {
-	ID              string `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
+	ID              string `gorm:"primaryKey"`
 	SourcePlatform  string `gorm:"uniqueIndex:idx_viral_opportunity_source,priority:1"`
 	ExternalVideoID string `gorm:"uniqueIndex:idx_viral_opportunity_source,priority:2"`
 	ChannelID       string
@@ -50,6 +52,13 @@ type ViralOpportunity struct {
 }
 
 func (ViralOpportunity) TableName() string { return "viral_opportunities" }
+
+func (v *ViralOpportunity) BeforeCreate(tx *gorm.DB) error {
+	if v.ID == "" {
+		v.ID = newUUID()
+	}
+	return nil
+}
 
 // ContentProfile is used to derive seed queries.
 type ContentProfile struct {
@@ -179,4 +188,14 @@ func (w *TrendCollectorWorker) upsert(ctx context.Context, scored []ScoredOpport
 			"updated_at",
 		}),
 	}).Create(&records).Error
+}
+
+func newUUID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("failed to generate uuid: %v", err))
+	}
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }

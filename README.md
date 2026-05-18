@@ -20,6 +20,7 @@
 - 📅 **Multi-Platform Scheduling** — Publish to TikTok, YouTube Shorts & Instagram Reels
 - 📈 **Analytics Dashboard** — Real-time engagement metrics across all connected platforms
 - 🔔 **Trending Topics** — Platform-wide trend monitoring for content alignment
+- 🚀 **Viral Opportunity Collector** — Hourly YouTube trend ingestion with view velocity, outlier, engagement, growth, and recommendation scoring
 - 🔐 **JWT Authentication** — Secure token-based auth with refresh token rotation
 - 📦 **Subscription Tiers** — Free / Starter / Pro / Enterprise with Stripe integration
 - 🐳 **Production-Ready** — Docker Compose + Kubernetes manifests included
@@ -202,6 +203,9 @@ cp .env.example .env
 | `STRIPE_SECRET_KEY`       | *(optional)*                   | Stripe secret key                |
 | `GOOGLE_CLIENT_ID`        | *(optional)*                   | Google OAuth client ID           |
 | `SENTRY_DSN`              | *(optional)*                   | Sentry error tracking DSN        |
+| `YOUTUBE_REGION_CODE`     | `US`                           | Region used for YouTube trend collection |
+| `YOUTUBE_MAX_RESULTS`     | `10`                           | Videos fetched per trend query   |
+| `YOUTUBE_LOOKBACK_WINDOW` | `168h`                         | Recency window for collected videos |
 
 ### Running Individual Services
 
@@ -241,6 +245,42 @@ pnpm install
 cp .env.example .env.local       # configure API URL
 pnpm dev
 ```
+
+---
+
+## Viral Opportunity Collector
+
+### Architecture Decisions
+
+- **YouTubeCollector (`apps/worker/internal/trends/collector.go`)** calls the YouTube Data API in two stages: search for recent high-view candidates, then hydrate video and channel statistics before persistence.
+- **TrendEngine (`apps/worker/internal/trends/engine.go`)** calculates the required metrics for every collected record: `view_velocity`, `engagement_rate`, `outlier_score`, `growth_score`, and `viral_score`.
+- **TrendCollectorWorker (`apps/worker/internal/trends/worker.go`)** runs immediately on worker startup and every hour after that, derives search seeds from `content_profiles`, and upserts rows into `viral_opportunities`.
+- **RecommendationEngine (`apps/api/internal/services/viral_opportunities.go`)** matches stored opportunities against each user's content profile niche and keywords so recommendations stay personalized without changing the existing auth or API architecture.
+- **API delivery** stays inside the existing Fiber + GORM stack with three new authenticated endpoints under `/api/v1/viral-opportunities`.
+
+### API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/viral-opportunities` | Paginated list of collected opportunities with optional `category` and `query` filters |
+| `GET` | `/api/v1/viral-opportunities/trending` | Recent top-ranked opportunities from the last 72 hours |
+| `GET` | `/api/v1/viral-opportunities/recommendations` | Personalized recommendations ranked against the authenticated user's content profiles |
+
+### Directory Changes
+
+- `apps/api/internal/handlers/viral_opportunities.go` — new API handler
+- `apps/api/internal/services/viral_opportunities.go` — list/trending service + recommendation engine
+- `apps/api/internal/handlers/viral_opportunities_test.go` — API integration coverage
+- `apps/api/internal/services/viral_opportunities_test.go` — recommendation and trending unit coverage
+- `apps/worker/internal/trends/collector.go` — YouTubeCollector implementation
+- `apps/worker/internal/trends/engine.go` — TrendEngine scoring logic
+- `apps/worker/internal/trends/worker.go` — hourly TrendCollectorWorker persistence flow
+- `apps/worker/internal/trends/*_test.go` — collector, scoring, and worker tests
+- `infrastructure/migrations/009_create_viral_opportunities.sql` — schema migration for collected opportunities
+
+### Migration
+
+Apply `infrastructure/migrations/009_create_viral_opportunities.sql` to create the `viral_opportunities` table and supporting indexes before running the worker in production.
 
 ---
 

@@ -176,9 +176,8 @@ func scoreOpportunity(opportunity models.ViralOpportunity, profiles []models.Con
 		}
 
 		platform := strings.ToLower(strings.TrimSpace(profile.Platform))
-		if platform == "youtube" || platform == "general" || platform == "" {
+		if profileMatched && (platform == "youtube" || platform == "general" || platform == "") {
 			fitScore += 5
-			profileMatched = true
 		}
 
 		if profileMatched {
