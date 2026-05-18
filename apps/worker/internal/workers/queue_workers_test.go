@@ -417,7 +417,7 @@ func TestQueueAnalyticsWorker_ProcessJob_CreatesAnalyticsRecord(t *testing.T) {
 	assert.Equal(t, "tiktok", record.Platform)
 }
 
-func TestQueueAnalyticsWorker_ProcessJob_ResolvesplatformFromPost(t *testing.T) {
+func TestQueueAnalyticsWorker_ProcessJob_ResolvesPlatformFromPost(t *testing.T) {
 	db := setupQueueWorkerDB(t)
 	qCli, _ := newTestQueueClient(t)
 
