@@ -453,6 +453,55 @@ curl -X DELETE http://localhost:8080/api/v1/clips/clip-uuid \
 
 ---
 
+### Enhance Clip Metadata (AI)
+
+```
+POST /clips/:id/metadata/enhance
+Authorization: Bearer <token>
+```
+
+**Request body (optional):**
+```json
+{
+  "platform": "tiktok",
+  "niche": "tech",
+  "tone": "educational"
+}
+```
+
+**Response `200`:**
+```json
+{
+  "success": true,
+  "data": {
+    "clip": {
+      "id": "clip-uuid",
+      "video_id": "vid-uuid",
+      "title": "Enhanced title",
+      "description": "Enhanced description",
+      "hashtags": ["viral", "trending", "fyp"]
+    },
+    "keywords": ["viral", "shorts", "engagement"],
+    "category": "Education",
+    "optimal_post_times": ["7:00 PM EST on Weekdays"]
+  }
+}
+```
+
+**curl example:**
+```bash
+curl -X POST http://localhost:8080/api/v1/clips/clip-uuid/metadata/enhance \
+  -H "Authorization: Bearer eyJhbGci..." \
+  -H "Content-Type: application/json" \
+  -d '{"platform":"youtube","niche":"tech","tone":"educational"}'
+```
+
+**Errors:**
+- `404 Not Found` — clip not found or not owned by user
+- `500 Internal Server Error` — AI service unavailable
+
+---
+
 ## Social & Scheduling
 
 ### List Connected Accounts
