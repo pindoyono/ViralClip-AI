@@ -133,6 +133,23 @@ type ClipAnalytics struct {
 
 func (ClipAnalytics) TableName() string { return "clip_analytics" }
 
+// FailedJobRecord mirrors the API's FailedJob model for worker-side DB access.
+type FailedJobRecord struct {
+	ID           string     `gorm:"primaryKey" json:"id"`
+	JobID        string     `gorm:"index;not null" json:"job_id"`
+	QueueName    string     `gorm:"not null" json:"queue_name"`
+	Payload      string     `json:"payload"`
+	ErrorMessage string     `json:"error_message"`
+	RetryCount   int        `gorm:"not null;default:0" json:"retry_count"`
+	MaxRetries   int        `gorm:"not null;default:3" json:"max_retries"`
+	Status       string     `gorm:"not null;default:'pending'" json:"status"`
+	LastRetryAt  *time.Time `json:"last_retry_at"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
+func (FailedJobRecord) TableName() string { return "failed_jobs" }
+
 // newUUID generates a random UUID v4 string without external dependencies.
 func newUUID() string {
 	b := make([]byte, 16)

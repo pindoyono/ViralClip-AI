@@ -46,6 +46,13 @@ func (b *baseQueueWorker) handleJobFailure(ctx context.Context, queueName string
 			Str("queue", queueName).
 			Msg("Job exceeded max retries, sending to dead-letter queue")
 
+		// Embed error details in job metadata so the DeadLetterWorker can persist them.
+		if job.Metadata == nil {
+			job.Metadata = make(map[string]string)
+		}
+		job.Metadata["error"] = err.Error()
+		job.Metadata["failed_at"] = job.UpdatedAt.Format(time.RFC3339)
+
 		if dlqErr := b.queueCli.PushDead(ctx, queueName, job); dlqErr != nil {
 			log.Error().Err(dlqErr).Str("job_id", job.ID).Msg("Failed to push to dead-letter queue")
 		}

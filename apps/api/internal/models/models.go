@@ -281,6 +281,37 @@ type ViralOpportunity struct {
 	ViralScore      float64   `gorm:"not null;default:0;index" json:"viral_score"`
 }
 
+// FailedJobStatus tracks the recovery lifecycle of a dead-letter job.
+type FailedJobStatus string
+
+const (
+	FailedJobStatusPending    FailedJobStatus = "pending"
+	FailedJobStatusRecovering FailedJobStatus = "recovering"
+	FailedJobStatusExhausted  FailedJobStatus = "exhausted"
+)
+
+// FailedJob persists dead-letter queue entries for inspection and recovery.
+type FailedJob struct {
+	ID           uuid.UUID       `gorm:"type:varchar(36);primaryKey" json:"id"`
+	JobID        string          `gorm:"not null;index" json:"job_id"`
+	QueueName    string          `gorm:"not null;index" json:"queue_name"`
+	Payload      string          `gorm:"type:text;not null" json:"payload"`
+	ErrorMessage string          `gorm:"type:text" json:"error_message"`
+	RetryCount   int             `gorm:"not null;default:0" json:"retry_count"`
+	MaxRetries   int             `gorm:"not null;default:3" json:"max_retries"`
+	Status       FailedJobStatus `gorm:"not null;default:'pending'" json:"status"`
+	LastRetryAt  *time.Time      `json:"last_retry_at,omitempty"`
+	CreatedAt    time.Time       `json:"created_at"`
+	UpdatedAt    time.Time       `json:"updated_at"`
+}
+
+func (f *FailedJob) BeforeCreate(tx *gorm.DB) error {
+	if f.ID == uuid.Nil {
+		f.ID = uuid.New()
+	}
+	return nil
+}
+
 // HookDetection stores a detected hook moment from the V2 Hook Engine.
 type HookDetection struct {
 	Base
