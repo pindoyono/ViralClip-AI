@@ -15,6 +15,7 @@ import (
 const (
 	trendingWindow       = 72 * time.Hour
 	recommendationWindow = 7 * 24 * time.Hour
+	defaultFitScore      = 15
 )
 
 // ViralOpportunityFilters controls list queries.
@@ -140,7 +141,7 @@ func (e *RecommendationEngine) Recommend(opportunities []models.ViralOpportunity
 
 func scoreOpportunity(opportunity models.ViralOpportunity, profiles []models.ContentProfile) ([]string, []string, float64) {
 	if len(profiles) == 0 {
-		return []string{"High viral score across recently collected YouTube videos"}, nil, 15
+		return []string{"High viral score across recently collected YouTube videos"}, nil, defaultFitScore
 	}
 
 	title := strings.ToLower(opportunity.Title)
