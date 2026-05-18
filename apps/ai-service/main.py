@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 
 from app.config import settings
-from app.routers import transcript, hooks, clips, subtitles, metadata, categories
+from app.routers import transcript, hooks, clips, subtitles, metadata, categories, process
 
 # Configure loguru
 logger.remove()
@@ -79,3 +79,4 @@ app.include_router(clips.router, prefix="/api/v1")
 app.include_router(subtitles.router, prefix="/api/v1")
 app.include_router(metadata.router, prefix="/api/v1")
 app.include_router(categories.router, prefix="/api/v1")
+app.include_router(process.router)  # /process/* — no extra prefix; router itself declares /process

@@ -17,6 +17,7 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/pindoyono/viralclip-ai/apps/worker/internal/config"
+	"github.com/pindoyono/viralclip-ai/apps/worker/internal/queue"
 	"github.com/pindoyono/viralclip-ai/apps/worker/internal/workers"
 )
 
@@ -47,8 +48,16 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to connect to Redis")
 	}
 
-	// Initialize workers
-	videoWorker := workers.NewVideoProcessingWorker(db, rdb, cfg.AI.ServiceURL, cfg.Worker.MaxRetries)
+	queueCli := queue.NewQueueClient(rdb, 0)
+
+	// Queue-based pipeline workers (replace the old DB polling loop).
+	transcriptWorker := workers.NewTranscriptWorker(db, queueCli, cfg.AI.ServiceURL, cfg.Worker.MaxRetries)
+	clipWorker := workers.NewClipWorker(db, queueCli, cfg.AI.ServiceURL, cfg.Worker.MaxRetries)
+	subtitleWorker := workers.NewSubtitleWorker(db, queueCli, cfg.AI.ServiceURL, cfg.Worker.MaxRetries)
+	uploadWorker := workers.NewUploadWorker(db, queueCli, cfg.AI.ServiceURL, cfg.Worker.MaxRetries)
+	analyticsQueueWorker := workers.NewQueueAnalyticsWorker(db, queueCli, cfg.Worker.MaxRetries)
+
+	// Time-based workers retained for their specific scheduling needs.
 	publishingWorker := workers.NewPublishingWorker(db, rdb)
 	cleanupWorker := workers.NewCleanupWorker(db, rdb)
 	analyticsWorker := workers.NewAnalyticsWorker(db, rdb)
@@ -57,21 +66,27 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	// Video processing loop
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		ticker := time.NewTicker(cfg.Worker.PollInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				videoWorker.ProcessPendingVideos(ctx)
-			}
+	// --- Queue consumer goroutines (one per worker type for concurrency == 1).
+	// Increase cfg.Worker.Concurrency > 1 to spawn multiple goroutines per queue.
+
+	startQueueWorker := func(name string, fn func(context.Context)) {
+		for i := 0; i < cfg.Worker.Concurrency; i++ {
+			wg.Add(1)
+			go func(workerName string) {
+				defer wg.Done()
+				log.Info().Str("worker", workerName).Msg("Starting queue consumer")
+				fn(ctx)
+			}(name)
 		}
-	}()
+	}
+
+	startQueueWorker("transcript", transcriptWorker.Start)
+	startQueueWorker("clip", clipWorker.Start)
+	startQueueWorker("subtitle", subtitleWorker.Start)
+	startQueueWorker("upload", uploadWorker.Start)
+	startQueueWorker("analytics_queue", analyticsQueueWorker.Start)
+
+	// --- Time-based worker goroutines ---
 
 	// Publishing loop (every minute)
 	wg.Add(1)

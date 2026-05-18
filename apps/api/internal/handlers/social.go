@@ -77,6 +77,69 @@ func (h *SocialHandler) DisconnectAccount(c *fiber.Ctx) error {
 	return utils.SuccessMessage(c, "Account disconnected successfully")
 }
 
+// ConnectAccount adds a social media account for the authenticated user.
+func (h *SocialHandler) ConnectAccount(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		return utils.Unauthorized(c, "Not authenticated")
+	}
+
+	var req dto.ConnectSocialAccountRequest
+	if err := c.BodyParser(&req); err != nil {
+		return utils.BadRequest(c, "Invalid request body")
+	}
+	if req.Platform == "" || req.Username == "" {
+		return utils.BadRequest(c, "platform and username are required")
+	}
+
+	uid, err := uuid.Parse(userID)
+	if err != nil {
+		return utils.InternalError(c, "Invalid user ID")
+	}
+
+	// Prevent duplicate connections for the same platform+username per user.
+	var existing models.SocialAccount
+	if result := h.db.Where("user_id = ? AND platform = ? AND username = ?", userID, req.Platform, req.Username).First(&existing); result.Error == nil {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"success": false,
+			"error": fiber.Map{
+				"code":    "already_connected",
+				"message": "This account is already connected",
+			},
+		})
+	}
+
+	account := models.SocialAccount{
+		Base:           models.Base{ID: uuid.New()},
+		UserID:         uid,
+		Platform:       models.SocialPlatform(req.Platform),
+		PlatformUserID: req.Username, // use username as platform user ID when no OAuth
+		Username:       req.Username,
+		DisplayName:    req.DisplayName,
+		AvatarURL:      req.AvatarURL,
+		AccessToken:    req.AccessToken,
+		IsActive:       true,
+		FollowersCount: req.FollowersCount,
+	}
+
+	if err := h.db.Create(&account).Error; err != nil {
+		log.Error().Err(err).Msg("Failed to connect social account")
+		return utils.InternalError(c, "Failed to connect account")
+	}
+
+	return utils.Created(c, dto.SocialAccountResponse{
+		ID:             account.ID,
+		UserID:         account.UserID,
+		Platform:       account.Platform,
+		Username:       account.Username,
+		DisplayName:    account.DisplayName,
+		AvatarURL:      account.AvatarURL,
+		IsActive:       account.IsActive,
+		FollowersCount: account.FollowersCount,
+		ConnectedAt:    account.CreatedAt,
+	})
+}
+
 // SchedulePost schedules a clip for publishing on a social platform.
 func (h *SocialHandler) SchedulePost(c *fiber.Ctx) error {
 	userID := middleware.GetUserID(c)

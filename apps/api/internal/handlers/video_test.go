@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -17,7 +19,45 @@ import (
 	"gorm.io/gorm/logger"
 
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/models"
+	"github.com/pindoyono/viralclip-ai/apps/api/internal/storage"
 )
+
+// mockStorageService is a StorageService implementation used in tests.
+type mockStorageService struct {
+	uploadErr   error
+	downloadErr error
+	deleteErr   error
+	uploadedKey string
+}
+
+func (m *mockStorageService) Upload(_ context.Context, key string, _ io.Reader, opts storage.UploadOptions) (*storage.FileInfo, error) {
+	if m.uploadErr != nil {
+		return nil, m.uploadErr
+	}
+	m.uploadedKey = key
+	return &storage.FileInfo{
+		Key:         key,
+		URL:         "http://localhost/storage/" + key,
+		Size:        1024,
+		ContentType: opts.ContentType,
+		CreatedAt:   time.Now(),
+	}, nil
+}
+
+func (m *mockStorageService) Download(_ context.Context, key string) (io.ReadCloser, error) {
+	if m.downloadErr != nil {
+		return nil, m.downloadErr
+	}
+	return io.NopCloser(nil), nil
+}
+
+func (m *mockStorageService) Delete(_ context.Context, key string) error {
+	return m.deleteErr
+}
+
+func (m *mockStorageService) GetURL(_ context.Context, key string) (string, error) {
+	return "http://localhost/storage/" + key, nil
+}
 
 func setupVideoTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -31,7 +71,7 @@ func setupVideoTestDB(t *testing.T) *gorm.DB {
 
 func setupVideoApp(db *gorm.DB) *fiber.App {
 	app := fiber.New()
-	h := NewVideoHandler(db, "/tmp/storage", "http://localhost/storage")
+	h := NewVideoHandler(db, &mockStorageService{})
 
 	// Inject a fake JWT token via middleware for tests
 	app.Use(func(c *fiber.Ctx) error {
@@ -274,10 +314,10 @@ func TestProcessVideo_TriggerSuccess(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, fiber.StatusOK, resp.StatusCode)
 
-	// Verify status updated
+	// Verify status reset to pending so the worker pipeline can pick it up
 	var updated models.Video
 	db.First(&updated, "id = ?", video.ID)
-	assert.Equal(t, models.VideoStatusProcessing, updated.Status)
+	assert.Equal(t, models.VideoStatusPending, updated.Status)
 }
 
 func TestProcessVideo_AlreadyProcessing(t *testing.T) {

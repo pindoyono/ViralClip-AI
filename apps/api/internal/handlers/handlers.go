@@ -70,13 +70,11 @@ func (h *ClipHandler) List(c *fiber.Ctx) error {
 	}
 
 	return utils.Success(c, dto.ClipListResponse{
-		Clips: responses,
-		Pagination: dto.PaginationMeta{
-			Page:       pagination.Page,
-			Limit:      pagination.Limit,
-			Total:      total,
-			TotalPages: totalPages,
-		},
+		Data:       responses,
+		Total:      total,
+		Page:       pagination.Page,
+		Limit:      pagination.Limit,
+		TotalPages: totalPages,
 	})
 }
 
@@ -258,12 +256,29 @@ func (h *AnalyticsHandler) Summary(c *fiber.Ctx) error {
 	var topClip models.Clip
 	h.db.Where("user_id = ?", userID).Order("viral_score DESC").First(&topClip)
 
+	// Determine top platform by total views
+	type platformViews struct {
+		Platform string
+		Total    int64
+	}
+	var topPlatformRow platformViews
+	h.db.Model(&models.ClipAnalytics{}).
+		Joins("JOIN clips ON clips.id = clip_analytics.clip_id").
+		Where("clips.user_id = ?", userID).
+		Select("clip_analytics.platform AS platform, SUM(clip_analytics.views) AS total").
+		Group("clip_analytics.platform").
+		Order("total DESC").
+		Limit(1).
+		Scan(&topPlatformRow)
+
 	summary := dto.AnalyticsSummaryResponse{
 		TotalViews:     totalViews,
 		TotalLikes:     totalLikes,
 		TotalComments:  totalComments,
 		TotalShares:    totalShares,
+		TopPlatform:    topPlatformRow.Platform,
 		PublishedClips: int(publishedClips),
+		ClipsPublished: int(publishedClips),
 		ScheduledPosts: int(scheduledPosts),
 	}
 
@@ -272,11 +287,55 @@ func (h *AnalyticsHandler) Summary(c *fiber.Ctx) error {
 		summary.TopClip = &resp
 	}
 
+	// avg_engagement_rate as a fraction 0–1 (compatible with frontend display)
 	if totalViews > 0 {
-		summary.AvgEngagement = float64(totalLikes+totalComments+totalShares) / float64(totalViews) * 100
+		summary.AvgEngagement = float64(totalLikes+totalComments+totalShares) / float64(totalViews)
 	}
 
 	return utils.Success(c, summary)
+}
+
+// ClipAnalytics returns per-platform analytics for a single clip.
+func (h *AnalyticsHandler) ClipAnalytics(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		return utils.Unauthorized(c, "Not authenticated")
+	}
+
+	clipID := c.Params("id")
+
+	// Verify the clip belongs to the user
+	var clip models.Clip
+	if err := h.db.Where("id = ? AND user_id = ?", clipID, userID).First(&clip).Error; err != nil {
+		return utils.NotFound(c, "Clip not found")
+	}
+
+	var analytics []models.ClipAnalytics
+	if err := h.db.Where("clip_id = ?", clipID).
+		Order("recorded_at DESC").
+		Find(&analytics).Error; err != nil {
+		log.Error().Err(err).Msg("Failed to fetch clip analytics")
+		return utils.InternalError(c, "Failed to fetch clip analytics")
+	}
+
+	responses := make([]dto.ClipAnalyticsResponse, len(analytics))
+	for i, a := range analytics {
+		responses[i] = dto.ClipAnalyticsResponse{
+			ID:             a.ID.String(),
+			ClipID:         a.ClipID.String(),
+			Platform:       string(a.Platform),
+			Views:          a.Views,
+			Likes:          a.Likes,
+			Comments:       a.Comments,
+			Shares:         a.Shares,
+			Saves:          a.Saves,
+			Reach:          a.Reach,
+			EngagementRate: a.EngagementRate,
+			SyncedAt:       a.RecordedAt.Format("2006-01-02T15:04:05Z"),
+		}
+	}
+
+	return utils.Success(c, responses)
 }
 
 // TrendingHandler handles trending topic requests.
