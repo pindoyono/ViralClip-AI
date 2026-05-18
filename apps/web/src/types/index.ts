@@ -83,6 +83,20 @@ export interface ClipAnalytics {
   synced_at: string;
 }
 
+export interface TrendingTopic {
+  id: string;
+  platform: string;
+  topic: string;
+  hashtag: string;
+  category: string;
+  trend_score: number;
+  post_count: number;
+  view_count: number;
+  growth_rate: number;
+  region: string;
+  expires_at: string;
+}
+
 export interface PaginatedResponse<T> {
   data: T[];
   total: number;

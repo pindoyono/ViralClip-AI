@@ -1,5 +1,5 @@
 /**
- * Tests for useAnalyticsSummary and useClipAnalytics hooks.
+ * Tests for useAnalyticsSummary, useClipAnalytics and useTrendingTopics hooks.
  */
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -12,7 +12,7 @@ jest.mock("@/lib/api", () => ({
 }));
 
 import { apiClient } from "@/lib/api";
-import { useAnalyticsSummary, useClipAnalytics } from "@/hooks/useAnalytics";
+import { useAnalyticsSummary, useClipAnalytics, useTrendingTopics } from "@/hooks/useAnalytics";
 
 function createWrapper() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -99,3 +99,63 @@ describe("useClipAnalytics", () => {
     expect(apiClient.get).not.toHaveBeenCalled();
   });
 });
+
+const MOCK_TRENDING = [
+  {
+    id: "t1",
+    platform: "tiktok",
+    topic: "AI Tips",
+    hashtag: "aitips",
+    category: "tech",
+    trend_score: 87.5,
+    post_count: 12000,
+    view_count: 5000000,
+    growth_rate: 24.3,
+    region: "global",
+    expires_at: "2024-02-01T00:00:00Z",
+  },
+];
+
+describe("useTrendingTopics", () => {
+  afterEach(() => jest.clearAllMocks());
+
+  it("fetches trending topics without platform filter", async () => {
+    (apiClient.get as jest.Mock).mockResolvedValueOnce({
+      data: { data: MOCK_TRENDING },
+    });
+
+    const { result } = renderHook(() => useTrendingTopics(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toHaveLength(1);
+    expect(result.current.data?.[0].topic).toBe("AI Tips");
+    expect(apiClient.get).toHaveBeenCalledWith("/trending");
+  });
+
+  it("fetches trending topics with platform filter", async () => {
+    (apiClient.get as jest.Mock).mockResolvedValueOnce({
+      data: { data: MOCK_TRENDING },
+    });
+
+    const { result } = renderHook(() => useTrendingTopics("tiktok"), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(apiClient.get).toHaveBeenCalledWith("/trending?platform=tiktok");
+  });
+
+  it("surfaces an error when the API fails", async () => {
+    (apiClient.get as jest.Mock).mockRejectedValueOnce(new Error("Server error"));
+
+    const { result } = renderHook(() => useTrendingTopics(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error).toBeDefined();
+  });
+});
+
