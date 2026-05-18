@@ -40,8 +40,44 @@ func newMockDriveService(t *testing.T, handler http.Handler) (*storage.GoogleDri
 	)
 	require.NoError(t, err)
 
-	gdSvc := storage.NewGoogleDriveStorageServiceWithClient(svc)
+	// Build an HTTP client that also routes to the mock server.
+	mockHTTPClient := &http.Client{
+		Transport: &mockTransport{
+			realTransport: http.DefaultTransport,
+			mockURL:       mockServer.URL,
+			tokenSrc:      tokenSrc,
+		},
+	}
+
+	// Point the resumable upload endpoint at the mock server as well.
+	resCfg := storage.ResumableUploadConfig{
+		UploadEndpoint: mockServer.URL + "/upload/drive/v3/files",
+		MaxRetries:     1,
+		RetryBaseDelay: time.Millisecond,
+	}
+
+	gdSvc := storage.NewGoogleDriveStorageServiceWithClient(svc, mockHTTPClient, resCfg)
 	return gdSvc, mockServer
+}
+
+// mockTransport rewrites the scheme+host of every request to the mock server.
+type mockTransport struct {
+	realTransport http.RoundTripper
+	mockURL       string
+	tokenSrc      oauth2.TokenSource
+}
+
+func (t *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Add auth header.
+	tok, err := t.tokenSrc.Token()
+	if err == nil {
+		req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
+	}
+	// Rewrite host to mock server.
+	req2 := req.Clone(req.Context())
+	req2.URL.Scheme = "http"
+	req2.URL.Host = strings.TrimPrefix(t.mockURL, "http://")
+	return t.realTransport.RoundTrip(req2)
 }
 
 // ---------------------------------------------------------------------------

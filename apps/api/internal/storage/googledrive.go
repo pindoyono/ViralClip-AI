@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -50,26 +51,59 @@ type GoogleDriveConfig struct {
 //	      uploads/
 //	      clips/
 //	      exports/
+//
+// For files whose size is known and exceeds 32 MiB, Upload automatically uses
+// the Drive resumable upload protocol (RFC-compliant chunked PUT), which
+// supports files larger than 2 GiB without buffering the entire payload.
+// Progress can be tracked via GetUploadProgress when UploadOptions.UploadID
+// is set, making GoogleDriveStorageService a ResumableStorageService.
 type GoogleDriveStorageService struct {
 	cfg    GoogleDriveConfig
 	svc    *drive.Service
 	// folderCache caches resolved Drive folder IDs to minimise API round-trips.
 	folderCache map[string]string
+	// resumable handles large-file uploads via the Drive resumable protocol.
+	resumable *ResumableUploadService
 }
 
 // NewGoogleDriveStorageServiceWithClient creates a GoogleDriveStorageService
-// using an already-configured *drive.Service. This constructor is primarily
-// intended for unit tests where the Drive client is wired to a mock HTTP
-// server.
-func NewGoogleDriveStorageServiceWithClient(svc *drive.Service) *GoogleDriveStorageService {
+// using an already-configured *drive.Service and optional ResumableUploadConfig.
+//
+// This constructor is intended for unit tests where the Drive client is wired
+// to a mock HTTP server.  Pass an *http.Client that routes to the same mock
+// server so resumable uploads are also intercepted.
+func NewGoogleDriveStorageServiceWithClient(svc *drive.Service, httpClient *http.Client, cfg ...ResumableUploadConfig) *GoogleDriveStorageService {
+	var resCfg ResumableUploadConfig
+	if len(cfg) > 0 {
+		resCfg = cfg[0]
+	}
+
+	tracker := NewUploadProgressTracker()
+	var resumable *ResumableUploadService
+	if httpClient != nil {
+		resumable = NewResumableUploadService(httpClient, tracker, resCfg)
+	}
+
 	return &GoogleDriveStorageService{
 		svc:         svc,
 		folderCache: make(map[string]string),
+		resumable:   resumable,
 	}
 }
+
 // NewGoogleDriveStorageService creates and authenticates a new
 // GoogleDriveStorageService using the supplied OAuth2 refresh-token credentials.
 func NewGoogleDriveStorageService(ctx context.Context, cfg GoogleDriveConfig) (*GoogleDriveStorageService, error) {
+	return NewGoogleDriveStorageServiceWithResumableConfig(ctx, cfg, ResumableUploadConfig{})
+}
+
+// NewGoogleDriveStorageServiceWithResumableConfig is like NewGoogleDriveStorageService
+// but allows callers to supply a custom ResumableUploadConfig.
+func NewGoogleDriveStorageServiceWithResumableConfig(
+	ctx context.Context,
+	cfg GoogleDriveConfig,
+	resCfg ResumableUploadConfig,
+) (*GoogleDriveStorageService, error) {
 	if cfg.ClientID == "" || cfg.ClientSecret == "" || cfg.RefreshToken == "" {
 		return nil, fmt.Errorf("google drive storage: ClientID, ClientSecret and RefreshToken are required")
 	}
@@ -84,20 +118,32 @@ func NewGoogleDriveStorageService(ctx context.Context, cfg GoogleDriveConfig) (*
 	token := &oauth2.Token{RefreshToken: cfg.RefreshToken}
 	tokenSource := oauthCfg.TokenSource(ctx, token)
 
-	svc, err := drive.NewService(ctx, option.WithTokenSource(tokenSource))
+	// Use the same authenticated HTTP client for both the Drive service and
+	// the ResumableUploadService so token refresh is handled uniformly.
+	httpClient := oauth2.NewClient(ctx, tokenSource)
+
+	svc, err := drive.NewService(ctx, option.WithHTTPClient(httpClient))
 	if err != nil {
 		return nil, fmt.Errorf("google drive storage: create Drive client: %w", err)
 	}
+
+	tracker := NewUploadProgressTracker()
+	resumable := NewResumableUploadService(httpClient, tracker, resCfg)
 
 	return &GoogleDriveStorageService{
 		cfg:         cfg,
 		svc:         svc,
 		folderCache: make(map[string]string),
+		resumable:   resumable,
 	}, nil
 }
 
 // Upload uploads the content of r to Google Drive, placing it in the folder
 // derived from opts.UserID and opts.Folder.
+//
+// When opts.FileSize > resumableThreshold (32 MiB) the upload uses the Drive
+// resumable protocol, which supports files larger than 2 GiB.  Set
+// opts.UploadID to track progress via GetUploadProgress.
 //
 // The key parameter is used only as a fallback filename when opts.Filename is
 // empty. The returned FileInfo.Key contains the Drive file ID, which must be
@@ -119,6 +165,21 @@ func (s *GoogleDriveStorageService) Upload(ctx context.Context, key string, r io
 		contentType = "application/octet-stream"
 	}
 
+	// Use resumable upload for large files when the ResumableUploadService is
+	// available and the file size is known and above the threshold.
+	if s.resumable != nil && opts.FileSize >= resumableThreshold {
+		return s.uploadResumable(ctx, folderID, filename, contentType, r, opts)
+	}
+
+	return s.uploadSimple(ctx, folderID, filename, contentType, r)
+}
+
+// uploadSimple uses the standard Drive Files.Create call (suitable for small files).
+func (s *GoogleDriveStorageService) uploadSimple(
+	ctx context.Context,
+	folderID, filename, contentType string,
+	r io.Reader,
+) (*FileInfo, error) {
 	fileMeta := &drive.File{
 		Name:    filename,
 		Parents: []string{folderID},
@@ -142,6 +203,54 @@ func (s *GoogleDriveStorageService) Upload(ctx context.Context, key string, r io
 		ContentType: f.MimeType,
 		CreatedAt:   createdAt,
 	}, nil
+}
+
+// uploadResumable delegates to ResumableUploadService for large files.
+func (s *GoogleDriveStorageService) uploadResumable(
+	ctx context.Context,
+	folderID, filename, contentType string,
+	r io.Reader,
+	opts UploadOptions,
+) (*FileInfo, error) {
+	fileID, err := s.resumable.UploadFile(ctx, folderID, filename, contentType, r, opts.FileSize, opts.UploadID)
+	if err != nil {
+		return nil, fmt.Errorf("google drive storage: resumable upload %q: %w", filename, err)
+	}
+
+	// Retrieve the file metadata to populate FileInfo.
+	f, err := s.svc.Files.Get(fileID).
+		Fields("id,name,size,createdTime,mimeType").
+		Context(ctx).
+		Do()
+	if err != nil || f.Id == "" {
+		// Non-fatal: return partial info rather than failing the whole upload.
+		return &FileInfo{
+			Key:         fileID,
+			URL:         fmt.Sprintf(googleDriveViewURLBase, fileID),
+			Size:        opts.FileSize,
+			ContentType: contentType,
+			CreatedAt:   time.Now().UTC(),
+		}, nil
+	}
+
+	createdAt, _ := time.Parse(time.RFC3339, f.CreatedTime)
+
+	return &FileInfo{
+		Key:         f.Id,
+		URL:         fmt.Sprintf(googleDriveViewURLBase, f.Id),
+		Size:        f.Size,
+		ContentType: f.MimeType,
+		CreatedAt:   createdAt,
+	}, nil
+}
+
+// GetUploadProgress returns the current progress for the given uploadID.
+// Returns (zero, false) when no upload with that ID is tracked.
+func (s *GoogleDriveStorageService) GetUploadProgress(uploadID string) (UploadProgress, bool) {
+	if s.resumable == nil {
+		return UploadProgress{}, false
+	}
+	return s.resumable.tracker.Get(uploadID)
 }
 
 // Download retrieves the file identified by the Drive file ID (key) and
@@ -251,3 +360,7 @@ func (s *GoogleDriveStorageService) ensureFolder(ctx context.Context, name, pare
 
 	return folder.Id, nil
 }
+
+// Compile-time proof that GoogleDriveStorageService satisfies both interfaces.
+var _ StorageService = (*GoogleDriveStorageService)(nil)
+var _ ResumableStorageService = (*GoogleDriveStorageService)(nil)
