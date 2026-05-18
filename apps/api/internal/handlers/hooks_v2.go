@@ -160,7 +160,11 @@ func (h *HookHandlerV2) Detect(c *fiber.Ctx) error {
 	}
 
 	// Convert to model and persist via repository.
-	uid, _ := uuid.Parse(userID)
+	uid, err := uuid.Parse(userID)
+	if err != nil {
+		log.Error().Err(err).Str("user_id", userID).Msg("Failed to parse user ID from context")
+		return utils.InternalError(c, "Invalid user session")
+	}
 	detections := make([]models.HookDetection, len(aiResp.Hooks))
 	for i, h := range aiResp.Hooks {
 		detections[i] = models.HookDetection{

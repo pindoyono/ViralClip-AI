@@ -19,6 +19,7 @@ Combines six independent signals into a final integer score in [0, 100]:
 from __future__ import annotations
 
 import re
+from collections import Counter
 from typing import List, Optional
 
 from loguru import logger
@@ -176,6 +177,5 @@ class HookScoreCalculator:
             return 0.0
         # Count words that appear more than once (exclude stop-words implicitly
         # via the 3-char minimum in _WORD_RE)
-        from collections import Counter
         repeated = sum(1 for _, cnt in Counter(words).items() if cnt >= 2)
         return min(7.0, repeated * 2.5)
