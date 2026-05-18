@@ -22,6 +22,7 @@ import (
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/config"
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/middleware"
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/models"
+	wshub "github.com/pindoyono/viralclip-ai/apps/api/internal/websocket"
 )
 
 // Server holds all application dependencies.
@@ -30,6 +31,7 @@ type Server struct {
 	DB     *gorm.DB
 	Redis  *redis.Client
 	Config *config.Config
+	Hub    *wshub.Hub
 }
 
 // New creates and initializes the server with all dependencies.
@@ -55,11 +57,15 @@ func New(cfg *config.Config) (*Server, error) {
 		ErrorHandler:      middleware.ErrorHandler,
 	})
 
+	hub := wshub.NewHub()
+	go hub.Run()
+
 	srv := &Server{
 		App:    app,
 		DB:     db,
 		Redis:  rdb,
 		Config: cfg,
+		Hub:    hub,
 	}
 
 	srv.registerGlobalMiddleware()

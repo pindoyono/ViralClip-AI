@@ -198,3 +198,43 @@ export interface SubtitleBurnResponse {
   video_id: string;
   clips_processed: number;
 }
+
+// =============================================================================
+// Real-Time Job Status
+// =============================================================================
+
+export type PipelineStage =
+  | "transcript"
+  | "clip"
+  | "subtitle"
+  | "upload"
+  | "completed";
+
+export type StageStatus =
+  | "pending"
+  | "processing"
+  | "done"
+  | "failed"
+  | "skipped";
+
+export interface PipelineStageInfo {
+  stage: PipelineStage;
+  status: StageStatus;
+  label: string;
+}
+
+/** Response from GET /api/v1/videos/:id/job-status */
+export interface JobStatusResponse {
+  video_id: string;
+  video_status: string;
+  job_status: string;
+  current_stage: PipelineStage;
+  stages: PipelineStageInfo[];
+}
+
+/** WebSocket message envelope pushed from the server */
+export interface WSMessage {
+  type: "status_update" | "ping";
+  video_id?: string;
+  payload?: JobStatusResponse;
+}

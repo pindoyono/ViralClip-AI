@@ -1,15 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { useQueryClient } from "@tanstack/react-query";
 import { useVideo, useDeleteVideo, useProcessVideo } from "@/hooks/useVideos";
 import { useClips } from "@/hooks/useClips";
 import { useHookDetections, useDetectHooks } from "@/hooks/useHooksV2";
 import { useGenerateClipsV2 } from "@/hooks/useClipsV2";
 import { useBurnSubtitles } from "@/hooks/useSubtitles";
+import { useJobStatus, useVideoProcessingWS } from "@/hooks/useJobStatus";
 import { formatBytes, formatDuration } from "@/lib/utils";
-import type { ClipV2ProfileType, ClipV2ResultItem, SubtitleStyle } from "@/types";
+import type {
+  ClipV2ProfileType,
+  ClipV2ResultItem,
+  JobStatusResponse,
+  PipelineStageInfo,
+  SubtitleStyle,
+} from "@/types";
 
 const VIDEO_STATUS_COLORS: Record<string, string> = {
   pending: "text-yellow-400 bg-yellow-400/10",
@@ -75,9 +83,97 @@ function ClipV2Card({ clip, index }: { clip: ClipV2ResultItem; index: number }) 
   );
 }
 
+// ---------------------------------------------------------------------------
+// ProcessingPipeline — real-time pipeline progress bar
+// ---------------------------------------------------------------------------
+
+const STAGE_ICONS: Record<string, string> = {
+  transcript: "🎙",
+  clip: "✂️",
+  subtitle: "💬",
+  upload: "☁️",
+};
+
+function StageStep({ info }: { info: PipelineStageInfo }) {
+  const isProcessing = info.status === "processing";
+  const isDone = info.status === "done";
+  const isFailed = info.status === "failed";
+
+  const ringColor = isDone
+    ? "bg-green-500 border-green-500"
+    : isFailed
+    ? "bg-red-500 border-red-500"
+    : isProcessing
+    ? "border-blue-400 bg-blue-400/20"
+    : "border-slate-600 bg-transparent";
+
+  const labelColor = isFailed
+    ? "text-red-400"
+    : isProcessing
+    ? "text-blue-400"
+    : isDone
+    ? "text-green-400"
+    : "text-slate-500";
+
+  return (
+    <div className="flex flex-col items-center gap-1 flex-1 min-w-0">
+      <div
+        className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-sm transition-all ${ringColor}`}
+        aria-label={info.label}
+      >
+        {isDone ? "✓" : isFailed ? "✗" : STAGE_ICONS[info.stage] ?? "·"}
+      </div>
+      <span className={`text-xs text-center truncate w-full ${labelColor}`}>
+        {info.label}
+      </span>
+      {isProcessing && (
+        <span className="text-xs text-blue-400 animate-pulse">running…</span>
+      )}
+    </div>
+  );
+}
+
+function ProcessingPipeline({
+  status,
+  wsConnected,
+}: {
+  status: JobStatusResponse;
+  wsConnected: boolean;
+}) {
+  return (
+    <div className="bg-slate-800 border border-slate-700 rounded-xl p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-base font-semibold text-white">
+          Processing Pipeline
+        </h2>
+        <div className="flex items-center gap-1.5 text-xs text-slate-400">
+          <span
+            className={`w-2 h-2 rounded-full ${
+              wsConnected ? "bg-green-400" : "bg-slate-600"
+            }`}
+          />
+          {wsConnected ? "Live" : "Polling"}
+        </div>
+      </div>
+
+      <div className="flex items-start gap-2">
+        {status.stages.map((s, i) => (
+          <div key={s.stage} className="flex items-start flex-1 min-w-0">
+            <StageStep info={s} />
+            {i < status.stages.length - 1 && (
+              <div className="h-0.5 flex-1 bg-slate-600 mt-4 mx-1 shrink-0" />
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function VideoDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const queryClient = useQueryClient();
 
   const [profileType, setProfileType] = useState<ClipV2ProfileType>("general");
   const [v2Clips, setV2Clips] = useState<ClipV2ResultItem[]>([]);
@@ -93,6 +189,29 @@ export default function VideoDetailPage() {
   const burnSubtitles = useBurnSubtitles(id);
   const deleteVideo = useDeleteVideo();
   const processVideo = useProcessVideo();
+
+  // Job status polling (HTTP fallback).
+  const { data: jobStatus } = useJobStatus(
+    video?.status === "processing" ? id : undefined
+  );
+
+  // Real-time WebSocket updates.
+  const handleWSUpdate = useCallback(
+    (payload: JobStatusResponse) => {
+      // Invalidate queries so the UI reflects the completed state immediately.
+      if (payload.video_status === "completed") {
+        queryClient.invalidateQueries({ queryKey: ["video", id] });
+        queryClient.invalidateQueries({ queryKey: ["clips", id] });
+      }
+      queryClient.setQueryData(["job-status", id], payload);
+    },
+    [id, queryClient]
+  );
+
+  const { connected: wsConnected } = useVideoProcessingWS(
+    video?.status === "processing" ? id : undefined,
+    { onUpdate: handleWSUpdate }
+  );
 
   if (videoLoading) {
     return (
@@ -193,6 +312,11 @@ export default function VideoDetailPage() {
           </button>
         </div>
       </div>
+
+      {/* Processing Pipeline (visible while video is being processed) */}
+      {video.status === "processing" && jobStatus && (
+        <ProcessingPipeline status={jobStatus} wsConnected={wsConnected} />
+      )}
 
       {/* Clips Section */}
       <div className="space-y-3">

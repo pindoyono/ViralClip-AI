@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/gofiber/fiber/v2"
+	fiberws "github.com/gofiber/websocket/v2"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog/log"
 
@@ -55,6 +56,13 @@ func Register(srv *server.Server) {
 	hookHandlerV2 := handlers.NewHookHandlerV2(srv.DB, srv.Config)
 	clipHandlerV2 := handlers.NewClipHandlerV2(srv.DB, srv.Config)
 	subtitleHandler := handlers.NewSubtitleHandler(srv.DB, srv.Config)
+	statusHandler := handlers.NewStatusHandler(srv.DB, srv.Redis, srv.Hub, srv.Config.JWT.Secret)
+
+	// Start the Redis Pub/Sub → WebSocket broadcaster in the background.
+	if srv.Redis != nil {
+		broadcaster := handlers.NewStatusBroadcaster(srv.Redis, srv.Hub, srv.DB)
+		go broadcaster.Run(context.Background())
+	}
 
 	// Health check
 	app.Get("/health", func(c *fiber.Ctx) error {
@@ -107,6 +115,13 @@ func Register(srv *server.Server) {
 
 	// Subtitle burning routes
 	videos.Post("/:videoId/subtitles/burn", subtitleHandler.BurnSubtitles)
+
+	// Job status route (HTTP polling fallback)
+	videos.Get("/:id/job-status", statusHandler.GetJobStatus)
+
+	// WebSocket route (authenticated via ?token= query param)
+	// WSUpgrade validates the JWT and sets ws_user_id in Locals before upgrade.
+	app.Get("/ws", statusHandler.WSUpgrade, fiberws.New(statusHandler.WSHandler))
 
 	// Clip routes
 	clips := v1.Group("/clips")

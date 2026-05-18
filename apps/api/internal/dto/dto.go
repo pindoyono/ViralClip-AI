@@ -440,3 +440,53 @@ type SubtitleBurnResponse struct {
 	VideoID        string `json:"video_id"`
 	ClipsProcessed int    `json:"clips_processed"`
 }
+
+// =============================================================================
+// Real-Time Job Status DTOs
+// =============================================================================
+
+// PipelineStage represents the name of a video processing pipeline step.
+type PipelineStage string
+
+const (
+	PipelineStageTranscript PipelineStage = "transcript"
+	PipelineStageClip       PipelineStage = "clip"
+	PipelineStageSubtitle   PipelineStage = "subtitle"
+	PipelineStageUpload     PipelineStage = "upload"
+	PipelineStageCompleted  PipelineStage = "completed"
+)
+
+// StageStatus is the status of a single pipeline stage.
+type StageStatus string
+
+const (
+	StageStatusPending    StageStatus = "pending"
+	StageStatusProcessing StageStatus = "processing"
+	StageStatusDone       StageStatus = "done"
+	StageStatusFailed     StageStatus = "failed"
+	StageStatusSkipped    StageStatus = "skipped"
+)
+
+// PipelineStageInfo describes one stage in the processing pipeline.
+type PipelineStageInfo struct {
+	Stage  PipelineStage `json:"stage"`
+	Status StageStatus   `json:"status"`
+	Label  string        `json:"label"`
+}
+
+// JobStatusResponse is returned by GET /api/v1/videos/:id/job-status.
+type JobStatusResponse struct {
+	VideoID      string              `json:"video_id"`
+	VideoStatus  string              `json:"video_status"`
+	JobStatus    string              `json:"job_status"`
+	CurrentStage PipelineStage       `json:"current_stage"`
+	Stages       []PipelineStageInfo `json:"stages"`
+}
+
+// WSMessage is the envelope for WebSocket messages pushed to clients.
+type WSMessage struct {
+	// Type identifies the message kind. Current values: "status_update", "ping".
+	Type    string      `json:"type"`
+	VideoID string      `json:"video_id,omitempty"`
+	Payload interface{} `json:"payload,omitempty"`
+}

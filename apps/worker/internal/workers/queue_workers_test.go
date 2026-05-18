@@ -324,7 +324,7 @@ func TestUploadWorker_ProcessJob_Success_MarksVideoCompleted(t *testing.T) {
 
 	status, err := qCli.GetStatus(ctx, "job-upload-1")
 	require.NoError(t, err)
-	assert.Equal(t, string(queue.JobStatusDone), status)
+	assert.Equal(t, "upload:done", status)
 }
 
 func TestUploadWorker_ProcessJob_AIFailure_MarksVideoFailed(t *testing.T) {
