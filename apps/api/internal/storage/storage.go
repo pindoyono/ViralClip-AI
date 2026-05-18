@@ -52,6 +52,17 @@ type UploadOptions struct {
 
 	// Filename is the original filename that may be preserved by the backend.
 	Filename string
+
+	// FileSize is the total byte count of the file being uploaded.
+	// When FileSize > 0 and the backend supports resumable uploads, the
+	// backend will automatically use the resumable upload protocol for files
+	// larger than the configured threshold (default 32 MiB).
+	FileSize int64
+
+	// UploadID is an optional caller-supplied identifier used to track upload
+	// progress via ResumableStorageService.GetUploadProgress. When empty,
+	// progress tracking is disabled for this upload.
+	UploadID string
 }
 
 // StorageService is the interface every storage backend must satisfy.
@@ -69,4 +80,51 @@ type StorageService interface {
 
 	// GetURL returns a directly accessible URL for the file identified by key.
 	GetURL(ctx context.Context, key string) (string, error)
+}
+
+// UploadStatus describes the current state of a resumable upload.
+type UploadStatus string
+
+const (
+	// UploadStatusUploading means the upload is in progress.
+	UploadStatusUploading UploadStatus = "uploading"
+	// UploadStatusCompleted means the upload finished successfully.
+	UploadStatusCompleted UploadStatus = "completed"
+	// UploadStatusFailed means the upload failed permanently.
+	UploadStatusFailed UploadStatus = "failed"
+)
+
+// UploadProgress records the state of a resumable upload.
+type UploadProgress struct {
+	// UploadID is the caller-supplied identifier for this upload.
+	UploadID string
+
+	// TotalBytes is the expected total file size in bytes.
+	// Zero means the total size is not known.
+	TotalBytes int64
+
+	// UploadedBytes is the number of bytes confirmed received by the backend.
+	UploadedBytes int64
+
+	// Status is the current upload status.
+	Status UploadStatus
+
+	// Error contains the error message when Status == UploadStatusFailed.
+	Error string
+
+	// StartedAt is the UTC time when the upload session was initiated.
+	StartedAt time.Time
+
+	// CompletedAt is the UTC time when the upload finished (or nil).
+	CompletedAt *time.Time
+}
+
+// ResumableStorageService extends StorageService with resumable upload support
+// for large files (2 GiB+).
+type ResumableStorageService interface {
+	StorageService
+
+	// GetUploadProgress returns the current progress for the given uploadID.
+	// Returns (zero, false) when no upload with that ID is tracked.
+	GetUploadProgress(uploadID string) (UploadProgress, bool)
 }

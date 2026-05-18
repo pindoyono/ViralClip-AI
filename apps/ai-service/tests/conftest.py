@@ -31,8 +31,14 @@ def pytest_configure(config):
         "app.services.metadata_service",
         "app.services.subtitle_service",
         "app.services.category_service",
+        "app.services.pause_detector",
+        "app.services.voice_intensity_analyzer",
+        "app.services.speech_pattern_analyzer",
+        "app.services.audio_signal_analyzer",
+        "app.services.audio_aware_hook_engine",
         "app.routers.process",
         "app.routers.hooks_v2",
+        "app.routers.hooks_v3",
         "app.routers.clips_v2",
     ]:
         try:

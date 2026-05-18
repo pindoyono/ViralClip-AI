@@ -50,11 +50,14 @@ func main() {
 
 	queueCli := queue.NewQueueClient(rdb, 0)
 
+	// Shared status publisher for real-time WebSocket notifications.
+	statusPub := workers.NewStatusPublisher(rdb)
+
 	// Queue-based pipeline workers (replace the old DB polling loop).
-	transcriptWorker := workers.NewTranscriptWorker(db, queueCli, cfg.AI.ServiceURL, cfg.Worker.MaxRetries)
-	clipWorker := workers.NewClipWorker(db, queueCli, cfg.AI.ServiceURL, cfg.Worker.MaxRetries)
-	subtitleWorker := workers.NewSubtitleWorker(db, queueCli, cfg.AI.ServiceURL, cfg.Worker.MaxRetries)
-	uploadWorker := workers.NewUploadWorker(db, queueCli, cfg.AI.ServiceURL, cfg.Worker.MaxRetries)
+	transcriptWorker := workers.NewTranscriptWorker(db, queueCli, cfg.AI.ServiceURL, cfg.Worker.MaxRetries).WithStatusPublisher(statusPub)
+	clipWorker := workers.NewClipWorker(db, queueCli, cfg.AI.ServiceURL, cfg.Worker.MaxRetries).WithStatusPublisher(statusPub)
+	subtitleWorker := workers.NewSubtitleWorker(db, queueCli, cfg.AI.ServiceURL, cfg.Worker.MaxRetries).WithStatusPublisher(statusPub)
+	uploadWorker := workers.NewUploadWorker(db, queueCli, cfg.AI.ServiceURL, cfg.Worker.MaxRetries).WithStatusPublisher(statusPub)
 	analyticsQueueWorker := workers.NewQueueAnalyticsWorker(db, queueCli, cfg.Worker.MaxRetries)
 
 	// Time-based workers retained for their specific scheduling needs.

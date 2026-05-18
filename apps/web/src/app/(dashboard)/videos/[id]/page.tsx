@@ -1,14 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { useQueryClient } from "@tanstack/react-query";
 import { useVideo, useDeleteVideo, useProcessVideo } from "@/hooks/useVideos";
 import { useClips } from "@/hooks/useClips";
 import { useHookDetections, useDetectHooks } from "@/hooks/useHooksV2";
 import { useGenerateClipsV2 } from "@/hooks/useClipsV2";
+import { useBurnSubtitles } from "@/hooks/useSubtitles";
+import { useJobStatus, useVideoProcessingWS } from "@/hooks/useJobStatus";
+import { useEnhanceMetadata } from "@/hooks/useMetadata";
 import { formatBytes, formatDuration } from "@/lib/utils";
-import type { ClipV2ProfileType, ClipV2ResultItem } from "@/types";
+import type {
+  ClipV2ProfileType,
+  ClipV2ResultItem,
+  EnhanceMetadataRequest,
+  JobStatusResponse,
+  MetadataEnhanceResponse,
+  PipelineStageInfo,
+  SubtitleStyle,
+} from "@/types";
 
 const VIDEO_STATUS_COLORS: Record<string, string> = {
   pending: "text-yellow-400 bg-yellow-400/10",
@@ -74,21 +86,144 @@ function ClipV2Card({ clip, index }: { clip: ClipV2ResultItem; index: number }) 
   );
 }
 
+// ---------------------------------------------------------------------------
+// ProcessingPipeline — real-time pipeline progress bar
+// ---------------------------------------------------------------------------
+
+const STAGE_ICONS: Record<string, string> = {
+  transcript: "🎙",
+  clip: "✂️",
+  subtitle: "💬",
+  upload: "☁️",
+};
+
+function StageStep({ info }: { info: PipelineStageInfo }) {
+  const isProcessing = info.status === "processing";
+  const isDone = info.status === "done";
+  const isFailed = info.status === "failed";
+
+  const ringColor = isDone
+    ? "bg-green-500 border-green-500"
+    : isFailed
+    ? "bg-red-500 border-red-500"
+    : isProcessing
+    ? "border-blue-400 bg-blue-400/20"
+    : "border-slate-600 bg-transparent";
+
+  const labelColor = isFailed
+    ? "text-red-400"
+    : isProcessing
+    ? "text-blue-400"
+    : isDone
+    ? "text-green-400"
+    : "text-slate-500";
+
+  return (
+    <div className="flex flex-col items-center gap-1 flex-1 min-w-0">
+      <div
+        className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-sm transition-all ${ringColor}`}
+        aria-label={info.label}
+      >
+        {isDone ? "✓" : isFailed ? "✗" : STAGE_ICONS[info.stage] ?? "·"}
+      </div>
+      <span className={`text-xs text-center truncate w-full ${labelColor}`}>
+        {info.label}
+      </span>
+      {isProcessing && (
+        <span className="text-xs text-blue-400 animate-pulse">running…</span>
+      )}
+    </div>
+  );
+}
+
+function ProcessingPipeline({
+  status,
+  wsConnected,
+}: {
+  status: JobStatusResponse;
+  wsConnected: boolean;
+}) {
+  return (
+    <div className="bg-slate-800 border border-slate-700 rounded-xl p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-base font-semibold text-white">
+          Processing Pipeline
+        </h2>
+        <div className="flex items-center gap-1.5 text-xs text-slate-400">
+          <span
+            className={`w-2 h-2 rounded-full ${
+              wsConnected ? "bg-green-400" : "bg-slate-600"
+            }`}
+          />
+          {wsConnected ? "Live" : "Polling"}
+        </div>
+      </div>
+
+      <div className="flex items-start gap-2">
+        {status.stages.map((s, i) => (
+          <div key={s.stage} className="flex items-start flex-1 min-w-0">
+            <StageStep info={s} />
+            {i < status.stages.length - 1 && (
+              <div className="h-0.5 flex-1 bg-slate-600 mt-4 mx-1 shrink-0" />
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function VideoDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const queryClient = useQueryClient();
 
   const [profileType, setProfileType] = useState<ClipV2ProfileType>("general");
   const [v2Clips, setV2Clips] = useState<ClipV2ResultItem[]>([]);
   const [v2ProfileUsed, setV2ProfileUsed] = useState("");
+  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>("default");
+  const [subtitleFontSize, setSubtitleFontSize] = useState(24);
 
   const { data: video, isLoading: videoLoading } = useVideo(id);
   const { data: clipsData, isLoading: clipsLoading } = useClips(id);
   const { data: hookData } = useHookDetections(id);
   const detectHooks = useDetectHooks(id);
   const generateClipsV2 = useGenerateClipsV2(id);
+  const burnSubtitles = useBurnSubtitles(id);
+  const enhanceMetadata = useEnhanceMetadata();
   const deleteVideo = useDeleteVideo();
   const processVideo = useProcessVideo();
+
+  // Per-clip enhance state.
+  const [enhancePlatform, setEnhancePlatform] = useState<
+    EnhanceMetadataRequest["platform"]
+  >("tiktok");
+  const [enhanceResults, setEnhanceResults] = useState<
+    Record<string, MetadataEnhanceResponse>
+  >({});
+
+  // Job status polling (HTTP fallback).
+  const { data: jobStatus } = useJobStatus(
+    video?.status === "processing" ? id : undefined
+  );
+
+  // Real-time WebSocket updates.
+  const handleWSUpdate = useCallback(
+    (payload: JobStatusResponse) => {
+      // Invalidate queries so the UI reflects the completed state immediately.
+      if (payload.video_status === "completed") {
+        queryClient.invalidateQueries({ queryKey: ["video", id] });
+        queryClient.invalidateQueries({ queryKey: ["clips", id] });
+      }
+      queryClient.setQueryData(["job-status", id], payload);
+    },
+    [id, queryClient]
+  );
+
+  const { connected: wsConnected } = useVideoProcessingWS(
+    video?.status === "processing" ? id : undefined,
+    { onUpdate: handleWSUpdate }
+  );
 
   if (videoLoading) {
     return (
@@ -190,9 +325,35 @@ export default function VideoDetailPage() {
         </div>
       </div>
 
+      {/* Processing Pipeline (visible while video is being processed) */}
+      {video.status === "processing" && jobStatus && (
+        <ProcessingPipeline status={jobStatus} wsConnected={wsConnected} />
+      )}
+
       {/* Clips Section */}
       <div className="space-y-3">
-        <h2 className="text-lg font-semibold text-white">Generated Clips</h2>
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <h2 className="text-lg font-semibold text-white">Generated Clips</h2>
+          {clips.length > 0 && (
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-slate-400">Enhance for</label>
+              <select
+                value={enhancePlatform}
+                onChange={(e) =>
+                  setEnhancePlatform(
+                    e.target.value as EnhanceMetadataRequest["platform"]
+                  )
+                }
+                className="bg-slate-700 border border-slate-600 rounded-lg px-2 py-1 text-white text-xs focus:outline-none focus:ring-2 focus:ring-amber-500"
+              >
+                <option value="tiktok">TikTok</option>
+                <option value="instagram">Instagram</option>
+                <option value="youtube">YouTube</option>
+                <option value="twitter">Twitter</option>
+              </select>
+            </div>
+          )}
+        </div>
 
         <div className="bg-slate-800 border border-slate-700 rounded-xl">
           {clipsLoading ? (
@@ -216,53 +377,208 @@ export default function VideoDetailPage() {
                 hashtags?: string[];
                 hook_text?: string;
                 status: string;
-              }>).map((clip) => (
-                <li key={clip.id} className="flex items-center gap-4 px-6 py-4">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-white font-medium truncate">{clip.title}</p>
-                    {clip.hook_text && (
-                      <p className="text-xs text-purple-300 mt-0.5 truncate italic">
-                        &ldquo;{clip.hook_text}&rdquo;
-                      </p>
-                    )}
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      {formatDuration(clip.duration)} · Viral score:{" "}
-                      <span className="text-purple-400 font-medium">
-                        {Math.round(clip.viral_score * 100)}%
-                      </span>
-                    </p>
-                    {clip.hashtags && clip.hashtags.length > 0 && (
-                      <p className="text-xs text-slate-500 mt-1 truncate">
-                        {clip.hashtags.slice(0, 4).join(" ")}
-                      </p>
-                    )}
-                  </div>
+                has_subtitles?: boolean;
+              }>).map((clip) => {
+                const result = enhanceResults[clip.id];
+                const isEnhancing =
+                  enhanceMetadata.isPending &&
+                  enhanceMetadata.variables?.clipId === clip.id;
+                return (
+                  <li key={clip.id} className="px-6 py-4 space-y-2">
+                    <div className="flex items-center gap-4">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white font-medium truncate">{clip.title}</p>
+                        {clip.hook_text && (
+                          <p className="text-xs text-purple-300 mt-0.5 truncate italic">
+                            &ldquo;{clip.hook_text}&rdquo;
+                          </p>
+                        )}
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {formatDuration(clip.duration)} · Viral score:{" "}
+                          <span className="text-purple-400 font-medium">
+                            {Math.round(clip.viral_score * 100)}%
+                          </span>
+                        </p>
+                        {clip.hashtags && clip.hashtags.length > 0 && (
+                          <p className="text-xs text-slate-500 mt-1 truncate">
+                            {clip.hashtags.slice(0, 4).join(" ")}
+                          </p>
+                        )}
+                      </div>
 
-                  <span
-                    className={`text-xs font-medium px-2 py-0.5 rounded-full capitalize shrink-0 ${
-                      CLIP_STATUS_COLORS[clip.status] ?? "text-slate-400"
-                    }`}
-                  >
-                    {clip.status}
-                  </span>
+                      <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                        {clip.has_subtitles && (
+                          <span className="text-xs bg-cyan-600/20 text-cyan-300 px-2 py-0.5 rounded-full font-medium">
+                            CC
+                          </span>
+                        )}
+                        <span
+                          className={`text-xs font-medium px-2 py-0.5 rounded-full capitalize ${
+                            CLIP_STATUS_COLORS[clip.status] ?? "text-slate-400"
+                          }`}
+                        >
+                          {clip.status}
+                        </span>
+                        {clip.status === "ready" && (
+                          <Link
+                            href={`/schedule?clip_id=${clip.id}`}
+                            className="text-xs bg-purple-600 hover:bg-purple-700 px-3 py-1.5 rounded-lg text-white transition-colors"
+                          >
+                            Schedule
+                          </Link>
+                        )}
+                        {clip.status === "ready" && (
+                          <button
+                            onClick={() =>
+                              enhanceMetadata.mutate(
+                                { clipId: clip.id, request: { platform: enhancePlatform } },
+                                {
+                                  onSuccess: (data) =>
+                                    setEnhanceResults((prev) => ({
+                                      ...prev,
+                                      [clip.id]: data,
+                                    })),
+                                }
+                              )
+                            }
+                            disabled={isEnhancing}
+                            title={`Enhance metadata for ${enhancePlatform}`}
+                            className="text-xs bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-600/40 disabled:opacity-50 px-2.5 py-1 rounded-lg font-medium transition-colors"
+                          >
+                            {isEnhancing ? "Enhancing…" : "✨ Enhance"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
 
-                  {clip.status === "ready" && (
-                    <Link
-                      href={`/schedule?clip_id=${clip.id}`}
-                      className="text-xs bg-purple-600 hover:bg-purple-700 px-3 py-1.5 rounded-lg text-white transition-colors shrink-0"
-                    >
-                      Schedule
-                    </Link>
-                  )}
-                </li>
-              ))}
+                    {/* Inline enhance result */}
+                    {result && (
+                      <div className="bg-amber-900/20 border border-amber-700/30 rounded-lg p-3 space-y-1.5 text-xs">
+                        <p className="text-amber-300 font-medium">✨ Metadata enhanced</p>
+                        <p className="text-white font-medium">{result.clip.title}</p>
+                        {result.category && (
+                          <p className="text-slate-400">
+                            Category: <span className="text-slate-300">{result.category}</span>
+                          </p>
+                        )}
+                        {result.keywords.length > 0 && (
+                          <p className="text-slate-400 truncate">
+                            Keywords:{" "}
+                            <span className="text-slate-300">
+                              {result.keywords.slice(0, 5).join(", ")}
+                            </span>
+                          </p>
+                        )}
+                        {result.optimal_post_times.length > 0 && (
+                          <p className="text-slate-400">
+                            Best time:{" "}
+                            <span className="text-slate-300">
+                              {result.optimal_post_times[0]}
+                            </span>
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
       </div>
 
-      {/* V2 Clip Generator Section */}
-      <div className="space-y-3">
+      {/* Subtitle Burning Section */}
+      {video.status === "completed" && clips.length > 0 && (
+        <div className="space-y-3">
+          <div>
+            <h2 className="text-lg font-semibold text-white">
+              Subtitle Burning{" "}
+              <span className="text-xs font-normal bg-cyan-700/30 text-cyan-300 px-2 py-0.5 rounded-full ml-1">
+                CC
+              </span>
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Burn captions into your clips so they display on every platform without manual editing.
+            </p>
+          </div>
+
+          <div className="bg-slate-800 border border-slate-700 rounded-xl p-5 space-y-4">
+            <div className="flex flex-wrap gap-3 items-end">
+              {/* Style selector */}
+              <div>
+                <label className="block text-xs text-slate-400 mb-1.5">Style</label>
+                <select
+                  value={subtitleStyle}
+                  onChange={(e) => setSubtitleStyle(e.target.value as SubtitleStyle)}
+                  className="bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                >
+                  <option value="default">Default</option>
+                  <option value="bold">Bold</option>
+                  <option value="outline">Outline</option>
+                  <option value="shadow">Shadow</option>
+                </select>
+              </div>
+
+              {/* Font size */}
+              <div>
+                <label className="block text-xs text-slate-400 mb-1.5">
+                  Font Size <span className="text-slate-500">({subtitleFontSize}pt)</span>
+                </label>
+                <input
+                  type="range"
+                  min={12}
+                  max={72}
+                  step={2}
+                  value={subtitleFontSize}
+                  onChange={(e) => setSubtitleFontSize(Number(e.target.value))}
+                  className="w-28 accent-cyan-500"
+                />
+              </div>
+
+              <button
+                onClick={() =>
+                  burnSubtitles.mutate({
+                    style: subtitleStyle,
+                    font_size: subtitleFontSize,
+                  })
+                }
+                disabled={burnSubtitles.isPending}
+                className="bg-cyan-700 hover:bg-cyan-600 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 rounded-lg text-white text-sm font-medium transition-colors shrink-0"
+              >
+                {burnSubtitles.isPending ? "Burning…" : "Burn Subtitles"}
+              </button>
+            </div>
+
+            {burnSubtitles.isError && (
+              <p className="text-xs text-red-400 bg-red-400/10 px-3 py-2 rounded-lg">
+                Failed to burn subtitles. Make sure the AI service is running and the video has been
+                processed.
+              </p>
+            )}
+
+            {burnSubtitles.isSuccess && (
+              <p className="text-xs text-cyan-400 bg-cyan-400/10 px-3 py-2 rounded-lg">
+                ✓ Subtitles burned into{" "}
+                <span className="font-semibold">
+                  {burnSubtitles.data?.clips_processed ?? 0} clip
+                  {(burnSubtitles.data?.clips_processed ?? 0) !== 1 ? "s" : ""}
+                </span>
+                . The <span className="font-semibold text-cyan-300">CC</span> badge will appear on
+                each clip above.
+              </p>
+            )}
+
+            {!burnSubtitles.isPending && !burnSubtitles.isError && !burnSubtitles.isSuccess && (
+              <p className="text-xs text-slate-500 text-center py-2">
+                Select a subtitle style and click <em>Burn Subtitles</em> to burn captions into all
+                extracted clips.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* V2 Clip Generator Section */}      <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-white">

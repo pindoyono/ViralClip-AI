@@ -85,6 +85,8 @@ func (h *VideoHandler) Upload(c *fiber.Ctx) error {
 		UserID:      userID,
 		Folder:      "uploads",
 		Filename:    file.Filename,
+		FileSize:    file.Size,
+		UploadID:    videoID.String(),
 	}
 
 	fileInfo, err := h.storageService.Upload(c.Context(), key, src, opts)

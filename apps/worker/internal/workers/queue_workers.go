@@ -19,11 +19,12 @@ const popTimeout = 5 * time.Second
 
 // baseQueueWorker provides the shared retry / dead-letter logic.
 type baseQueueWorker struct {
-	db         *gorm.DB
-	queueCli   *queue.QueueClient
-	httpClient *http.Client
-	aiURL      string
-	maxRetries int
+	db          *gorm.DB
+	queueCli    *queue.QueueClient
+	httpClient  *http.Client
+	aiURL       string
+	maxRetries  int
+	statusPub   *StatusPublisher
 }
 
 // handleJobFailure either re-queues the job (if retries remain) or sends it
@@ -122,8 +123,15 @@ func NewTranscriptWorker(db *gorm.DB, qCli *queue.QueueClient, aiURL string, max
 			httpClient: &http.Client{Timeout: 300 * time.Second},
 			aiURL:      aiURL,
 			maxRetries: maxRetries,
+			statusPub:  NewStatusPublisher(nil),
 		},
 	}
+}
+
+// WithStatusPublisher replaces the no-op StatusPublisher with a real one.
+func (w *TranscriptWorker) WithStatusPublisher(pub *StatusPublisher) *TranscriptWorker {
+	w.statusPub = pub
+	return w
 }
 
 // Start begins the blocking consume loop. It exits when ctx is cancelled.
@@ -153,20 +161,32 @@ func (w *TranscriptWorker) Start(ctx context.Context) {
 func (w *TranscriptWorker) processJob(ctx context.Context, job *queue.Job) {
 	log.Info().Str("job_id", job.ID).Str("video_id", job.VideoID).Msg("TranscriptWorker: processing job")
 
-	_ = w.queueCli.TrackStatus(ctx, job.ID, string(queue.JobStatusProcessing), queue.DefaultJobTTL)
+	_ = w.queueCli.TrackStatus(ctx, job.ID, "transcript:processing", queue.DefaultJobTTL)
 	w.updateVideoStatus(ctx, job.VideoID, string(VideoStatusProcessing), "")
+	w.statusPub.Publish(ctx, StageChangeEvent{
+		VideoID: job.VideoID, UserID: job.UserID,
+		Stage: "transcript", Status: "processing", VideoStatus: string(VideoStatusProcessing),
+	})
 
 	resp, err := w.callAI(ctx, "/process/transcript", map[string]interface{}{
 		"video_id":     job.VideoID,
 		"storage_path": job.StoragePath,
 	})
 	if err != nil {
+		w.statusPub.Publish(ctx, StageChangeEvent{
+			VideoID: job.VideoID, UserID: job.UserID,
+			Stage: "transcript", Status: "failed", VideoStatus: string(VideoStatusFailed),
+		})
 		w.handleJobFailure(ctx, queue.QueueTranscript, job, err)
 		return
 	}
 	resp.Body.Close()
 
-	_ = w.queueCli.TrackStatus(ctx, job.ID, string(queue.JobStatusDone), queue.DefaultJobTTL)
+	_ = w.queueCli.TrackStatus(ctx, job.ID, "transcript:done", queue.DefaultJobTTL)
+	w.statusPub.Publish(ctx, StageChangeEvent{
+		VideoID: job.VideoID, UserID: job.UserID,
+		Stage: "transcript", Status: "done", VideoStatus: string(VideoStatusProcessing),
+	})
 
 	// Advance the job to the clip generation stage.
 	job.Type = queue.JobTypeClip
@@ -196,8 +216,15 @@ func NewClipWorker(db *gorm.DB, qCli *queue.QueueClient, aiURL string, maxRetrie
 			httpClient: &http.Client{Timeout: 300 * time.Second},
 			aiURL:      aiURL,
 			maxRetries: maxRetries,
+			statusPub:  NewStatusPublisher(nil),
 		},
 	}
+}
+
+// WithStatusPublisher replaces the no-op StatusPublisher with a real one.
+func (w *ClipWorker) WithStatusPublisher(pub *StatusPublisher) *ClipWorker {
+	w.statusPub = pub
+	return w
 }
 
 // Start begins the blocking consume loop.
@@ -227,13 +254,21 @@ func (w *ClipWorker) Start(ctx context.Context) {
 func (w *ClipWorker) processJob(ctx context.Context, job *queue.Job) {
 	log.Info().Str("job_id", job.ID).Str("video_id", job.VideoID).Msg("ClipWorker: processing job")
 
-	_ = w.queueCli.TrackStatus(ctx, job.ID, string(queue.JobStatusProcessing), queue.DefaultJobTTL)
+	_ = w.queueCli.TrackStatus(ctx, job.ID, "clip:processing", queue.DefaultJobTTL)
+	w.statusPub.Publish(ctx, StageChangeEvent{
+		VideoID: job.VideoID, UserID: job.UserID,
+		Stage: "clip", Status: "processing", VideoStatus: string(VideoStatusProcessing),
+	})
 
 	resp, err := w.callAI(ctx, "/process/clips", map[string]interface{}{
 		"video_id":     job.VideoID,
 		"storage_path": job.StoragePath,
 	})
 	if err != nil {
+		w.statusPub.Publish(ctx, StageChangeEvent{
+			VideoID: job.VideoID, UserID: job.UserID,
+			Stage: "clip", Status: "failed", VideoStatus: string(VideoStatusFailed),
+		})
 		w.handleJobFailure(ctx, queue.QueueClip, job, err)
 		return
 	}
@@ -263,7 +298,11 @@ func (w *ClipWorker) processJob(ctx context.Context, job *queue.Job) {
 		w.saveClipsToDB(ctx, job, clipsResp.Clips)
 	}
 
-	_ = w.queueCli.TrackStatus(ctx, job.ID, string(queue.JobStatusDone), queue.DefaultJobTTL)
+	_ = w.queueCli.TrackStatus(ctx, job.ID, "clip:done", queue.DefaultJobTTL)
+	w.statusPub.Publish(ctx, StageChangeEvent{
+		VideoID: job.VideoID, UserID: job.UserID,
+		Stage: "clip", Status: "done", VideoStatus: string(VideoStatusProcessing),
+	})
 
 	job.Type = queue.JobTypeSubtitle
 	if pushErr := w.queueCli.Push(ctx, queue.QueueSubtitle, job); pushErr != nil {
@@ -357,8 +396,15 @@ func NewSubtitleWorker(db *gorm.DB, qCli *queue.QueueClient, aiURL string, maxRe
 			httpClient: &http.Client{Timeout: 120 * time.Second},
 			aiURL:      aiURL,
 			maxRetries: maxRetries,
+			statusPub:  NewStatusPublisher(nil),
 		},
 	}
+}
+
+// WithStatusPublisher replaces the no-op StatusPublisher with a real one.
+func (w *SubtitleWorker) WithStatusPublisher(pub *StatusPublisher) *SubtitleWorker {
+	w.statusPub = pub
+	return w
 }
 
 // Start begins the blocking consume loop.
@@ -388,19 +434,31 @@ func (w *SubtitleWorker) Start(ctx context.Context) {
 func (w *SubtitleWorker) processJob(ctx context.Context, job *queue.Job) {
 	log.Info().Str("job_id", job.ID).Str("video_id", job.VideoID).Msg("SubtitleWorker: processing job")
 
-	_ = w.queueCli.TrackStatus(ctx, job.ID, string(queue.JobStatusProcessing), queue.DefaultJobTTL)
+	_ = w.queueCli.TrackStatus(ctx, job.ID, "subtitle:processing", queue.DefaultJobTTL)
+	w.statusPub.Publish(ctx, StageChangeEvent{
+		VideoID: job.VideoID, UserID: job.UserID,
+		Stage: "subtitle", Status: "processing", VideoStatus: string(VideoStatusProcessing),
+	})
 
 	resp, err := w.callAI(ctx, "/process/subtitles", map[string]interface{}{
 		"video_id":     job.VideoID,
 		"storage_path": job.StoragePath,
 	})
 	if err != nil {
+		w.statusPub.Publish(ctx, StageChangeEvent{
+			VideoID: job.VideoID, UserID: job.UserID,
+			Stage: "subtitle", Status: "failed", VideoStatus: string(VideoStatusFailed),
+		})
 		w.handleJobFailure(ctx, queue.QueueSubtitle, job, err)
 		return
 	}
 	resp.Body.Close()
 
-	_ = w.queueCli.TrackStatus(ctx, job.ID, string(queue.JobStatusDone), queue.DefaultJobTTL)
+	_ = w.queueCli.TrackStatus(ctx, job.ID, "subtitle:done", queue.DefaultJobTTL)
+	w.statusPub.Publish(ctx, StageChangeEvent{
+		VideoID: job.VideoID, UserID: job.UserID,
+		Stage: "subtitle", Status: "done", VideoStatus: string(VideoStatusProcessing),
+	})
 
 	job.Type = queue.JobTypeUpload
 	if pushErr := w.queueCli.Push(ctx, queue.QueueUpload, job); pushErr != nil {
@@ -429,8 +487,15 @@ func NewUploadWorker(db *gorm.DB, qCli *queue.QueueClient, aiURL string, maxRetr
 			httpClient: &http.Client{Timeout: 120 * time.Second},
 			aiURL:      aiURL,
 			maxRetries: maxRetries,
+			statusPub:  NewStatusPublisher(nil),
 		},
 	}
+}
+
+// WithStatusPublisher replaces the no-op StatusPublisher with a real one.
+func (w *UploadWorker) WithStatusPublisher(pub *StatusPublisher) *UploadWorker {
+	w.statusPub = pub
+	return w
 }
 
 // Start begins the blocking consume loop.
@@ -460,13 +525,21 @@ func (w *UploadWorker) Start(ctx context.Context) {
 func (w *UploadWorker) processJob(ctx context.Context, job *queue.Job) {
 	log.Info().Str("job_id", job.ID).Str("video_id", job.VideoID).Msg("UploadWorker: processing job")
 
-	_ = w.queueCli.TrackStatus(ctx, job.ID, string(queue.JobStatusProcessing), queue.DefaultJobTTL)
+	_ = w.queueCli.TrackStatus(ctx, job.ID, "upload:processing", queue.DefaultJobTTL)
+	w.statusPub.Publish(ctx, StageChangeEvent{
+		VideoID: job.VideoID, UserID: job.UserID,
+		Stage: "upload", Status: "processing", VideoStatus: string(VideoStatusProcessing),
+	})
 
 	resp, err := w.callAI(ctx, "/process/video", map[string]interface{}{
 		"video_id":     job.VideoID,
 		"storage_path": job.StoragePath,
 	})
 	if err != nil {
+		w.statusPub.Publish(ctx, StageChangeEvent{
+			VideoID: job.VideoID, UserID: job.UserID,
+			Stage: "upload", Status: "failed", VideoStatus: string(VideoStatusFailed),
+		})
 		w.handleJobFailure(ctx, queue.QueueUpload, job, err)
 		return
 	}
@@ -483,7 +556,11 @@ func (w *UploadWorker) processJob(ctx context.Context, job *queue.Job) {
 		log.Error().Err(dbErr).Str("video_id", job.VideoID).Msg("UploadWorker: failed to mark video completed")
 	}
 
-	_ = w.queueCli.TrackStatus(ctx, job.ID, string(queue.JobStatusDone), queue.DefaultJobTTL)
+	_ = w.queueCli.TrackStatus(ctx, job.ID, "upload:done", queue.DefaultJobTTL)
+	w.statusPub.Publish(ctx, StageChangeEvent{
+		VideoID: job.VideoID, UserID: job.UserID,
+		Stage: "upload", Status: "done", VideoStatus: string(VideoStatusCompleted),
+	})
 
 	log.Info().Str("job_id", job.ID).Str("video_id", job.VideoID).Msg("UploadWorker: video processing pipeline complete")
 }

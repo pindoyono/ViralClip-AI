@@ -178,3 +178,89 @@ export interface ClipV2GenerateResponse {
   clips: ClipV2ResultItem[];
   total: number;
 }
+
+// =============================================================================
+// Subtitle Burning
+// =============================================================================
+
+export type SubtitleStyle = "default" | "bold" | "outline" | "shadow";
+
+/** Optional style overrides for POST /api/v1/videos/:id/subtitles/burn */
+export interface SubtitleBurnRequest {
+  style?: SubtitleStyle;
+  font_size?: number;
+  primary_color?: string;
+  outline_color?: string;
+}
+
+/** Response from POST /api/v1/videos/:id/subtitles/burn */
+export interface SubtitleBurnResponse {
+  video_id: string;
+  clips_processed: number;
+}
+
+// =============================================================================
+// Real-Time Job Status
+// =============================================================================
+
+export type PipelineStage =
+  | "transcript"
+  | "clip"
+  | "subtitle"
+  | "upload"
+  | "completed";
+
+export type StageStatus =
+  | "pending"
+  | "processing"
+  | "done"
+  | "failed"
+  | "skipped";
+
+export interface PipelineStageInfo {
+  stage: PipelineStage;
+  status: StageStatus;
+  label: string;
+}
+
+/** Response from GET /api/v1/videos/:id/job-status */
+export interface JobStatusResponse {
+  video_id: string;
+  video_status: string;
+  job_status: string;
+  current_stage: PipelineStage;
+  stages: PipelineStageInfo[];
+}
+
+/** WebSocket message envelope pushed from the server */
+export interface WSMessage {
+  type: "status_update" | "ping";
+  video_id?: string;
+  payload?: JobStatusResponse;
+}
+
+// =============================================================================
+// Metadata Enhancement
+// =============================================================================
+
+/** Optional body for POST /api/v1/clips/:id/metadata/enhance */
+export interface EnhanceMetadataRequest {
+  /** Target platform for optimised metadata. Defaults to "tiktok". */
+  platform?: "tiktok" | "instagram" | "youtube" | "twitter";
+  /** Optional content niche (e.g. "tech", "fitness"). */
+  niche?: string;
+  /** Optional tone descriptor (e.g. "educational", "humorous"). */
+  tone?: string;
+}
+
+/** Response from POST /api/v1/clips/:id/metadata/enhance */
+export interface MetadataEnhanceResponse {
+  /** Updated clip record with enhanced title, description, and hashtags. */
+  clip: Clip;
+  /** SEO-relevant keywords suggested by the AI. */
+  keywords: string[];
+  /** Primary content category inferred by the AI. */
+  category: string;
+  /** Suggested optimal posting times, e.g. "7:00 PM EST on Weekdays". */
+  optimal_post_times: string[];
+}

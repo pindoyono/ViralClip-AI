@@ -217,6 +217,7 @@ func toClipResponse(clip models.Clip) dto.ClipResponse {
 		Hashtags:     hashtags,
 		SuggestedFor: suggestedFor,
 		Status:       clip.Status,
+		HasSubtitles: clip.SubtitlePath != "",
 		CreatedAt:    clip.CreatedAt,
 	}
 }

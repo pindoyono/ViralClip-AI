@@ -122,6 +122,7 @@ type ClipResponse struct {
 	Hashtags     []string          `json:"hashtags"`
 	SuggestedFor []string          `json:"suggested_for"`
 	Status       models.ClipStatus `json:"status"`
+	HasSubtitles bool              `json:"has_subtitles"`
 	CreatedAt    time.Time         `json:"created_at"`
 }
 
@@ -411,4 +412,110 @@ type ClipV2GenerateResponse struct {
 	ProfileType string             `json:"profile_type"`
 	Clips       []ClipV2ResultItem `json:"clips"`
 	Total       int                `json:"total"`
+}
+
+// =============================================================================
+// Subtitle Burning DTOs
+// =============================================================================
+
+// SubtitleBurnRequest is the request body for POST /api/v1/videos/:id/subtitles/burn.
+// All fields are optional; when omitted the AI service uses its defaults.
+type SubtitleBurnRequest struct {
+	// Style controls the visual appearance of the subtitles.
+	// Valid values: "default", "bold", "outline", "shadow".
+	Style string `json:"style"`
+
+	// FontSize is the subtitle font size in points (12–72, default 24).
+	FontSize int `json:"font_size"`
+
+	// PrimaryColor is the subtitle text colour in ASS/SSA &HBBGGRR format.
+	PrimaryColor string `json:"primary_color"`
+
+	// OutlineColor is the subtitle outline/border colour in ASS/SSA &HBBGGRR format.
+	OutlineColor string `json:"outline_color"`
+}
+
+// SubtitleBurnResponse is the response body for the subtitle burn endpoint.
+type SubtitleBurnResponse struct {
+	VideoID        string `json:"video_id"`
+	ClipsProcessed int    `json:"clips_processed"`
+}
+
+// =============================================================================
+// Real-Time Job Status DTOs
+// =============================================================================
+
+// PipelineStage represents the name of a video processing pipeline step.
+type PipelineStage string
+
+const (
+	PipelineStageTranscript PipelineStage = "transcript"
+	PipelineStageClip       PipelineStage = "clip"
+	PipelineStageSubtitle   PipelineStage = "subtitle"
+	PipelineStageUpload     PipelineStage = "upload"
+	PipelineStageCompleted  PipelineStage = "completed"
+)
+
+// StageStatus is the status of a single pipeline stage.
+type StageStatus string
+
+const (
+	StageStatusPending    StageStatus = "pending"
+	StageStatusProcessing StageStatus = "processing"
+	StageStatusDone       StageStatus = "done"
+	StageStatusFailed     StageStatus = "failed"
+	StageStatusSkipped    StageStatus = "skipped"
+)
+
+// PipelineStageInfo describes one stage in the processing pipeline.
+type PipelineStageInfo struct {
+	Stage  PipelineStage `json:"stage"`
+	Status StageStatus   `json:"status"`
+	Label  string        `json:"label"`
+}
+
+// JobStatusResponse is returned by GET /api/v1/videos/:id/job-status.
+type JobStatusResponse struct {
+	VideoID      string              `json:"video_id"`
+	VideoStatus  string              `json:"video_status"`
+	JobStatus    string              `json:"job_status"`
+	CurrentStage PipelineStage       `json:"current_stage"`
+	Stages       []PipelineStageInfo `json:"stages"`
+}
+
+// WSMessage is the envelope for WebSocket messages pushed to clients.
+type WSMessage struct {
+	// Type identifies the message kind. Current values: "status_update", "ping".
+	Type    string      `json:"type"`
+	VideoID string      `json:"video_id,omitempty"`
+	Payload interface{} `json:"payload,omitempty"`
+}
+
+// =============================================================================
+// Metadata Enhancement DTOs
+// =============================================================================
+
+// EnhanceMetadataRequest is the optional request body for
+// POST /api/v1/clips/:id/metadata/enhance.
+type EnhanceMetadataRequest struct {
+	// Platform specifies the target social platform for metadata optimisation.
+	// Valid values: tiktok | instagram | youtube | twitter. Defaults to "tiktok".
+	Platform string `json:"platform"`
+	// Niche is an optional content niche descriptor (e.g. "tech", "fitness").
+	Niche string `json:"niche"`
+	// Tone is an optional tone descriptor (e.g. "educational", "humorous").
+	Tone string `json:"tone"`
+}
+
+// MetadataEnhanceResponse is returned after the clip is enhanced.
+// The clip's title, description, and hashtags are updated in the database.
+type MetadataEnhanceResponse struct {
+	// Clip is the updated clip record.
+	Clip ClipResponse `json:"clip"`
+	// Keywords are SEO-relevant keywords suggested by the AI.
+	Keywords []string `json:"keywords"`
+	// Category is the primary content category inferred by the AI.
+	Category string `json:"category"`
+	// OptimalPostTimes contains suggested posting times (e.g. "7:00 PM EST on Weekdays").
+	OptimalPostTimes []string `json:"optimal_post_times"`
 }
