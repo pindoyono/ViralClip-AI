@@ -3,7 +3,9 @@ package trends
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -24,6 +26,9 @@ type YouTubeCollector struct {
 	lookback   time.Duration
 	httpClient *http.Client
 	now        func() time.Time
+	rateLimiter *RateLimiterService
+	quotaMonitor *QuotaMonitorService
+	cache       *YouTubeCacheService
 }
 
 // CollectedVideo represents the raw metrics pulled from YouTube.
@@ -57,13 +62,16 @@ func NewYouTubeCollector(apiKey, regionCode string, maxResults int, lookback tim
 		lookback = 7 * 24 * time.Hour
 	}
 	return &YouTubeCollector{
-		apiKey:     apiKey,
-		baseURL:    "https://www.googleapis.com/youtube/v3",
-		regionCode: regionCode,
-		maxResults: maxResults,
-		lookback:   lookback,
-		httpClient: httpClient,
-		now:        func() time.Time { return time.Now().UTC() },
+		apiKey:       apiKey,
+		baseURL:      "https://www.googleapis.com/youtube/v3",
+		regionCode:   regionCode,
+		maxResults:   maxResults,
+		lookback:     lookback,
+		httpClient:   httpClient,
+		now:          func() time.Time { return time.Now().UTC() },
+		rateLimiter:  NewRateLimiterService(5),
+		quotaMonitor: NewQuotaMonitorService(10000, 200),
+		cache:        NewYouTubeCacheService(30 * time.Minute),
 	}
 }
 
@@ -72,6 +80,24 @@ func (c *YouTubeCollector) WithBaseURL(baseURL string) *YouTubeCollector {
 	if baseURL != "" {
 		c.baseURL = strings.TrimRight(baseURL, "/")
 	}
+	return c
+}
+
+// WithRateLimiter overrides the request rate limiter service.
+func (c *YouTubeCollector) WithRateLimiter(svc *RateLimiterService) *YouTubeCollector {
+	c.rateLimiter = svc
+	return c
+}
+
+// WithQuotaMonitor overrides the quota monitor service.
+func (c *YouTubeCollector) WithQuotaMonitor(svc *QuotaMonitorService) *YouTubeCollector {
+	c.quotaMonitor = svc
+	return c
+}
+
+// WithCache overrides the YouTube response cache service.
+func (c *YouTubeCollector) WithCache(svc *YouTubeCacheService) *YouTubeCollector {
+	c.cache = svc
 	return c
 }
 
@@ -91,13 +117,22 @@ func (c *YouTubeCollector) Collect(ctx context.Context, queries []string) ([]Col
 
 	categoryMap, err := c.fetchCategoryMap(ctx)
 	if err != nil {
-		return nil, err
+		if errors.Is(err, ErrQuotaExceeded) {
+			log.Warn().Msg("YouTubeCollector: skipping categories because quota budget is exhausted")
+			categoryMap = map[string]string{}
+		} else {
+			return nil, err
+		}
 	}
 
 	videoQueryMap := make(map[string]string)
 	for _, query := range queries {
 		items, err := c.searchVideos(ctx, query)
 		if err != nil {
+			if errors.Is(err, ErrQuotaExceeded) {
+				log.Warn().Str("query", query).Msg("YouTubeCollector: quota exhausted, stopping further search calls")
+				break
+			}
 			return nil, err
 		}
 		for _, item := range items.Items {
@@ -116,6 +151,10 @@ func (c *YouTubeCollector) Collect(ctx context.Context, queries []string) ([]Col
 
 	videoDetails, err := c.fetchVideoDetails(ctx, ids)
 	if err != nil {
+		if errors.Is(err, ErrQuotaExceeded) {
+			log.Warn().Msg("YouTubeCollector: quota exhausted before loading video details")
+			return nil, nil
+		}
 		return nil, err
 	}
 	channelIDs := make([]string, 0, len(videoDetails))
@@ -126,7 +165,12 @@ func (c *YouTubeCollector) Collect(ctx context.Context, queries []string) ([]Col
 	}
 	subscriberMap, err := c.fetchChannelSubscribers(ctx, channelIDs)
 	if err != nil {
-		return nil, err
+		if errors.Is(err, ErrQuotaExceeded) {
+			log.Warn().Msg("YouTubeCollector: quota exhausted before loading channel subscribers")
+			subscriberMap = map[string]int64{}
+		} else {
+			return nil, err
+		}
 	}
 
 	videos := make([]CollectedVideo, 0, len(videoDetails))
@@ -277,6 +321,22 @@ func (c *YouTubeCollector) fetchCategoryMap(ctx context.Context) (map[string]str
 }
 
 func (c *YouTubeCollector) get(ctx context.Context, path string, params url.Values, target interface{}) error {
+	if c.cache != nil {
+		if ok := c.cache.Get(path, params, target); ok {
+			return nil
+		}
+	}
+	if c.quotaMonitor != nil {
+		if err := c.quotaMonitor.Reserve(quotaCostForPath(path)); err != nil {
+			return err
+		}
+	}
+	if c.rateLimiter != nil {
+		if err := c.rateLimiter.Wait(ctx); err != nil {
+			return fmt.Errorf("rate limit wait %s: %w", path, err)
+		}
+	}
+
 	endpoint := c.baseURL + path + "?" + params.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -288,10 +348,21 @@ func (c *YouTubeCollector) get(ctx context.Context, path string, params url.Valu
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusForbidden && c.quotaMonitor != nil {
+			c.quotaMonitor.MarkExhausted()
+			return ErrQuotaExceeded
+		}
 		return fmt.Errorf("request %s returned status %d", path, resp.StatusCode)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(target); err != nil {
+	payload, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	if err := json.Unmarshal(payload, target); err != nil {
 		return fmt.Errorf("decode %s: %w", path, err)
+	}
+	if c.cache != nil {
+		c.cache.Set(path, params, payload)
 	}
 	return nil
 }
