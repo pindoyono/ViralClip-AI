@@ -88,6 +88,35 @@ User schedules clips → Worker publishes to platforms
 Analytics synced back to dashboard
 ```
 
+### Auto Publishing Flow (OAuth → Refresh → Scheduler → Publishing → Retry)
+
+```
+User connects social account (OAuth tokens stored in social_accounts)
+      │
+      ▼
+TokenRefreshService (apps/worker/internal/workers/token_refresh.go)
+refreshes expiring access_token before publish window
+      │
+      ▼
+SchedulerWorker (apps/worker/internal/workers/workers.go)
+moves due scheduled_posts (scheduled/pending) → publishing
+      │
+      ▼
+PublishingWorker (apps/worker/internal/workers/workers.go)
+uploads clip to platform and writes publishing_logs
+      │
+      ├─ success → status=published, published_at set, platform_post_id/url set
+      │
+      └─ fail   → failPostWithRetry()
+                 retry_count++, publish_at rescheduled with backoff,
+                 status returns to scheduled (or failed when max retries reached)
+```
+
+Worker runtime in `apps/worker/main.go` starts these loops with immediate first run:
+- `TokenRefreshService.RefreshExpiringTokens` (startup + every 15m)
+- `SchedulerWorker.EnqueueDuePosts` (startup + every 30s)
+- `PublishingWorker.ProcessScheduledPosts` (startup + every 1m)
+
 ---
 
 ## Tech Stack
@@ -253,7 +282,7 @@ pnpm dev
 
 ### Architecture Decisions
 
-- **Existing DLQ mechanism** in `apps/worker/internal/queue/queue.go` already pushes failed jobs to `{queue}:dead` Redis lists via `PushDead()`. Task 1 builds the persistence and recovery layer on top of this.
+- **Existing DLQ mechanism** in `apps/worker/internal/queue/queue.go` pushes failed jobs to explicit Redis lists such as `transcript_dlq`, `clip_dlq`, `upload_dlq`, and `analytics_dlq` via `PushDead()`. Task 1 builds the persistence and recovery layer on top of this.
 - **DeadLetterWorker** (`apps/worker/internal/workers/dlq_worker.go`) spawns one consumer goroutine per monitored DLQ. It BLPOP-s dead jobs, serialises them and writes a `FailedJobRecord` to the `failed_jobs` table. Separation from `RecoveryWorker` keeps concerns clear and allows dead-letter inspection before any recovery attempt.
 - **RecoveryWorker** (`apps/worker/internal/workers/recovery_worker.go`) polls the `failed_jobs` table every 30 s. It uses **exponential back-off** (`2^retryCount × 30 s`, capped at 1 hour) so transient failures don't hammer the AI service. The worker-level `maxRetries` setting acts as a hard cap independent of any per-job value.
 - **QueueMetricsService** (`apps/api/internal/services/queue_metrics.go`) queries Redis LLEN for all queue and DLQ depths and counts `FailedJob` rows by status — no additional infrastructure required.
@@ -289,7 +318,7 @@ Job fails in worker
 handleJobFailure stores error in Metadata, calls PushDead
       │
       ▼
-{queue}:dead Redis list
+Explicit DLQ Redis list (`transcript_dlq`, `clip_dlq`, `subtitle_dlq`, `upload_dlq`, `analytics_dlq`)
       │
       ▼
 DeadLetterWorker reads DLQ → writes FailedJobRecord (status: pending)

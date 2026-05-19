@@ -47,7 +47,9 @@ func pushToDLQ(t *testing.T, rdb *redis.Client, origQueue string, job *queue.Job
 	t.Helper()
 	data, err := json.Marshal(job)
 	require.NoError(t, err)
-	require.NoError(t, rdb.RPush(context.Background(), origQueue+":dead", data).Err())
+	dlqName, err := queue.DeadLetterQueueName(origQueue)
+	require.NoError(t, err)
+	require.NoError(t, rdb.RPush(context.Background(), dlqName, data).Err())
 }
 
 // ---------------------------------------------------------------------------

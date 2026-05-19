@@ -298,6 +298,14 @@ class ClipV2ResultSchema(BaseModel):
     profile_type:    str   = Field(..., description="Content profile used")
 
 
+class HistoricalRetentionContext(BaseModel):
+    """Aggregated historical retention metrics from ClipAnalytics."""
+    sample_size: int = Field(default=0, ge=0)
+    avg_retention: float = Field(default=0.0, ge=0.0, le=1.0)
+    short_retention: float = Field(default=0.0, ge=0.0, le=1.0)
+    long_retention: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
 class ClipGenerateV2Request(BaseModel):
     """Request body for the V2 clip generation endpoint."""
     video_id: str
@@ -311,6 +319,10 @@ class ClipGenerateV2Request(BaseModel):
     profile_type: ProfileType = Field(
         default=ProfileType.GENERAL,
         description="Content profile controlling clip duration range",
+    )
+    historical_context: Optional[HistoricalRetentionContext] = Field(
+        default=None,
+        description="Optional historical ClipAnalytics aggregates for retention learning",
     )
     min_clip_score: int = Field(default=50, ge=0, le=100)
     max_clips: int      = Field(default=10, ge=1, le=30)

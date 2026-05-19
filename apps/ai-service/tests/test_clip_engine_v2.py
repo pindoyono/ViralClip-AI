@@ -243,6 +243,60 @@ class TestRetentionPredictor:
         score = predictor.score(long_text, 30.0, 15.0, 60.0, has_hook=True)
         assert score <= 100
 
+    def test_historical_high_retention_increases_score(self, predictor):
+        base = predictor.score("Some engaging text!", 25.0, 15.0, 60.0)
+        boosted = predictor.score(
+            "Some engaging text!",
+            25.0,
+            15.0,
+            60.0,
+            historical_context={
+                "sample_size": 40,
+                "avg_retention": 0.9,
+                "short_retention": 0.95,
+                "long_retention": 0.7,
+            },
+        )
+        assert boosted > base
+
+    def test_historical_context_prefers_short_when_short_performs_better(self, predictor):
+        context = {
+            "sample_size": 50,
+            "avg_retention": 0.7,
+            "short_retention": 0.95,
+            "long_retention": 0.40,
+        }
+        short_score = predictor.score("Balanced text.", 20.0, 15.0, 60.0, historical_context=context)
+        long_score = predictor.score("Balanced text.", 45.0, 15.0, 60.0, historical_context=context)
+        assert short_score > long_score
+
+    def test_historical_sample_size_controls_impact(self, predictor):
+        tiny_sample = predictor.score(
+            "Interesting content!",
+            25.0,
+            15.0,
+            60.0,
+            historical_context={
+                "sample_size": 1,
+                "avg_retention": 0.95,
+                "short_retention": 0.95,
+                "long_retention": 0.95,
+            },
+        )
+        large_sample = predictor.score(
+            "Interesting content!",
+            25.0,
+            15.0,
+            60.0,
+            historical_context={
+                "sample_size": 50,
+                "avg_retention": 0.95,
+                "short_retention": 0.95,
+                "long_retention": 0.95,
+            },
+        )
+        assert large_sample > tiny_sample
+
 
 # ===========================================================================
 # ClipScoreCalculatorV2
@@ -546,6 +600,17 @@ class TestClipV2Endpoint:
         payload["hook_detections"] = [
             {"start": 0.0, "end": 5.0, "type": "storytelling", "score": 88, "matched_pattern": "suddenly"}
         ]
+        resp = client.post("/api/v1/clips/v2/generate", json=payload)
+        assert resp.status_code == 200
+
+    def test_historical_context_accepted(self, client):
+        payload = self._payload()
+        payload["historical_context"] = {
+            "sample_size": 25,
+            "avg_retention": 0.72,
+            "short_retention": 0.81,
+            "long_retention": 0.63,
+        }
         resp = client.post("/api/v1/clips/v2/generate", json=payload)
         assert resp.status_code == 200
 

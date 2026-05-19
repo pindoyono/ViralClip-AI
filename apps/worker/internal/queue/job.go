@@ -4,14 +4,18 @@
 // call BlockingPop (BLPOP) so workers sleep in Redis instead of hammering
 // the database.
 //
-// Dead-letter queues are named "{queue_name}:dead". Jobs that exceed their
-// MaxRetries limit are moved there automatically by the consumer helpers.
+// Dead-letter queues use explicit Redis keys such as "transcript_dlq" and
+// "clip_dlq". Jobs that exceed their MaxRetries limit are moved there
+// automatically by the consumer helpers.
 //
 // Job status is tracked in a Redis hash key "job:{id}" with a configurable
 // TTL so callers can inspect a job's current state without querying the DB.
 package queue
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // Queue name constants shared between the API publisher and the worker consumers.
 const (
@@ -20,7 +24,21 @@ const (
 	QueueSubtitle   = "subtitle_queue"
 	QueueUpload     = "upload_queue"
 	QueueAnalytics  = "analytics_queue"
+
+	QueueTranscriptDLQ = "transcript_dlq"
+	QueueClipDLQ       = "clip_dlq"
+	QueueSubtitleDLQ   = "subtitle_dlq"
+	QueueUploadDLQ     = "upload_dlq"
+	QueueAnalyticsDLQ  = "analytics_dlq"
 )
+
+var deadLetterQueueNames = map[string]string{
+	QueueTranscript: QueueTranscriptDLQ,
+	QueueClip:       QueueClipDLQ,
+	QueueSubtitle:   QueueSubtitleDLQ,
+	QueueUpload:     QueueUploadDLQ,
+	QueueAnalytics:  QueueAnalyticsDLQ,
+}
 
 // JobStatus represents the lifecycle state of a queued job.
 type JobStatus string
@@ -83,9 +101,14 @@ type Job struct {
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
-// deadLetterKey returns the dead-letter queue name for a given queue.
-func deadLetterKey(queueName string) string {
-	return queueName + ":dead"
+// DeadLetterQueueName returns the explicit dead-letter queue name for a given
+// main queue.
+func DeadLetterQueueName(queueName string) (string, error) {
+	if dlqName, ok := deadLetterQueueNames[queueName]; ok {
+		return dlqName, nil
+	}
+
+	return "", fmt.Errorf("unknown queue %q", queueName)
 }
 
 // statusKey returns the Redis key used to track a job's status.

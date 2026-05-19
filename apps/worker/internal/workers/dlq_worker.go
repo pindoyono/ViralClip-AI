@@ -13,7 +13,7 @@ import (
 )
 
 // deadLetterQueues lists the original queue names whose dead-letter variants
-// this worker monitors. The DLQ key is "{name}:dead" (see queue.deadLetterKey).
+// this worker monitors.
 var deadLetterQueues = []string{
 	queue.QueueTranscript,
 	queue.QueueClip,
@@ -52,9 +52,14 @@ func (w *DeadLetterWorker) Start(ctx context.Context) {
 	log.Info().Msg("DeadLetterWorker: stopped")
 }
 
-// consumeDLQ pops jobs from "{origQueue}:dead" and persists them.
+// consumeDLQ pops jobs from the explicit DLQ bound to origQueue and persists
+// them.
 func (w *DeadLetterWorker) consumeDLQ(ctx context.Context, origQueue string) {
-	dlqName := origQueue + ":dead"
+	dlqName, err := queue.DeadLetterQueueName(origQueue)
+	if err != nil {
+		log.Error().Err(err).Str("queue", origQueue).Msg("DeadLetterWorker: unknown dead-letter queue mapping")
+		return
+	}
 	log.Info().Str("dlq", dlqName).Msg("DeadLetterWorker: monitoring DLQ")
 
 	for {
