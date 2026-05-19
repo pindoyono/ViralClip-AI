@@ -83,7 +83,7 @@ func (s *TokenRefreshService) RefreshExpiringTokens(ctx context.Context) {
 			return
 		default:
 			if err := s.refreshToken(ctx, account); err != nil {
-				log.Debug().
+				log.Warn().
 					Err(err).
 					Str("account_id", account.ID).
 					Msg("TokenRefreshService: refresh attempt completed with error")
