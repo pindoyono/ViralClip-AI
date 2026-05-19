@@ -100,7 +100,10 @@ func (s *TokenRefreshService) EnsureValidAccessToken(ctx context.Context, accoun
 	if account.AccessToken == "" {
 		return fmt.Errorf("missing access token")
 	}
-	if account.TokenExpiresAt == nil || account.TokenExpiresAt.After(time.Now().UTC().Add(30*time.Second)) {
+	now := time.Now().UTC()
+	// Keep using the current token only if expiry is known and still safe.
+	// Unknown expiry (nil) is treated as unsafe and triggers a refresh.
+	if account.TokenExpiresAt != nil && account.TokenExpiresAt.After(now.Add(30*time.Second)) {
 		return nil
 	}
 
@@ -116,7 +119,7 @@ func (s *TokenRefreshService) refreshToken(ctx context.Context, account *SocialA
 		return fmt.Errorf("missing refresh_token")
 	}
 
-	newToken, newExpiry, err := s.callPlatformRefresh(ctx, *account)
+	newToken, newExpiry, err := s.callPlatformRefresh(ctx, account)
 	if err != nil {
 		log.Error().
 			Err(err).
@@ -174,7 +177,7 @@ func (s *TokenRefreshService) refreshToken(ctx context.Context, account *SocialA
 //   - Instagram: POST https://api.instagram.com/oauth/access_token  (short-lived)
 //     or GET https://graph.instagram.com/refresh_access_token  (long-lived)
 //   - TikTok:    POST https://open.tiktokapis.com/v2/oauth/token/refresh/
-func (s *TokenRefreshService) callPlatformRefresh(_ context.Context, account SocialAccount) (string, time.Time, error) {
+func (s *TokenRefreshService) callPlatformRefresh(_ context.Context, account *SocialAccount) (string, time.Time, error) {
 	if account.RefreshToken == "" {
 		return "", time.Time{}, fmt.Errorf("no refresh_token for account %s", account.ID)
 	}
