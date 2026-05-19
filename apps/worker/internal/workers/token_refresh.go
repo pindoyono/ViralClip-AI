@@ -16,6 +16,10 @@ const (
 	// Refreshing 15 minutes early gives the PublishingWorker fresh tokens to use.
 	tokenRefreshWindow = 15 * time.Minute
 
+	// tokenUploadSafetyWindow is the minimum remaining token validity required
+	// before upload starts; tokens expiring within this window are refreshed.
+	tokenUploadSafetyWindow = 30 * time.Second
+
 	// tokenRefreshFailureChannel is the Redis Pub/Sub channel where refresh
 	// failures are published so monitoring dashboards and alerting can react.
 	tokenRefreshFailureChannel = "token:refresh:failures"
@@ -77,20 +81,46 @@ func (s *TokenRefreshService) RefreshExpiringTokens(ctx context.Context) {
 
 	log.Info().Int("count", len(accounts)).Msg("TokenRefreshService: refreshing expiring tokens")
 
-	for _, account := range accounts {
+	for idx := range accounts {
 		select {
 		case <-ctx.Done():
 			return
 		default:
-			s.refreshToken(ctx, account)
+			if err := s.refreshToken(ctx, &accounts[idx]); err != nil {
+				log.Warn().
+					Err(err).
+					Str("account_id", accounts[idx].ID).
+					Str("platform", accounts[idx].Platform).
+					Msg("TokenRefreshService: failed refreshing expiring token")
+			}
 		}
 	}
 }
 
-func (s *TokenRefreshService) refreshToken(ctx context.Context, account SocialAccount) {
+// EnsureValidAccessToken guarantees the given account has a usable access token
+// for immediate upload. If the token is expired (or near expiry), it refreshes
+// the token, persists it in DB, and updates the account object in-place.
+func (s *TokenRefreshService) EnsureValidAccessToken(ctx context.Context, account *SocialAccount) error {
+	if account.AccessToken == "" {
+		return fmt.Errorf("missing access token")
+	}
+	now := time.Now().UTC()
+	// Keep using the current token only if expiry is known and still safe.
+	// Unknown expiry (nil) is treated as unsafe and triggers a refresh.
+	if account.TokenExpiresAt != nil && account.TokenExpiresAt.After(now.Add(tokenUploadSafetyWindow)) {
+		return nil
+	}
+
+	if err := s.refreshToken(ctx, account); err != nil {
+		return fmt.Errorf("access token refresh failed: %w", err)
+	}
+	return nil
+}
+
+func (s *TokenRefreshService) refreshToken(ctx context.Context, account *SocialAccount) error {
 	if account.RefreshToken == "" {
 		s.notifyFailure(ctx, account.ID, account.Platform, "missing refresh_token")
-		return
+		return fmt.Errorf("missing refresh_token")
 	}
 
 	newToken, newExpiry, err := s.callPlatformRefresh(ctx, account)
@@ -114,28 +144,33 @@ func (s *TokenRefreshService) refreshToken(ctx context.Context, account SocialAc
 			log.Error().Err(dbErr).Str("account_id", account.ID).
 				Msg("TokenRefreshService: failed to increment token_refresh_attempts")
 		}
-		return
+		return err
 	}
 
 	if err := s.db.WithContext(ctx).
 		Table("social_accounts").
 		Where("id = ?", account.ID).
 		Updates(map[string]interface{}{
-			"access_token":            newToken,
-			"expires_at":              newExpiry,
-			"token_refresh_attempts":  0,
-			"updated_at":              time.Now().UTC(),
+			"access_token":           newToken,
+			"expires_at":             newExpiry,
+			"token_refresh_attempts": 0,
+			"updated_at":             time.Now().UTC(),
 		}).Error; err != nil {
 		log.Error().Err(err).Str("account_id", account.ID).
 			Msg("TokenRefreshService: failed to persist refreshed token")
-		return
+		return err
 	}
+
+	account.AccessToken = newToken
+	account.TokenExpiresAt = &newExpiry
+	account.TokenRefreshAttempts = 0
 
 	log.Info().
 		Str("account_id", account.ID).
 		Str("platform", account.Platform).
 		Time("new_expiry", newExpiry).
 		Msg("TokenRefreshService: token refreshed successfully")
+	return nil
 }
 
 // callPlatformRefresh calls the platform's OAuth token refresh endpoint.
@@ -146,7 +181,7 @@ func (s *TokenRefreshService) refreshToken(ctx context.Context, account SocialAc
 //   - Instagram: POST https://api.instagram.com/oauth/access_token  (short-lived)
 //     or GET https://graph.instagram.com/refresh_access_token  (long-lived)
 //   - TikTok:    POST https://open.tiktokapis.com/v2/oauth/token/refresh/
-func (s *TokenRefreshService) callPlatformRefresh(_ context.Context, account SocialAccount) (string, time.Time, error) {
+func (s *TokenRefreshService) callPlatformRefresh(_ context.Context, account *SocialAccount) (string, time.Time, error) {
 	if account.RefreshToken == "" {
 		return "", time.Time{}, fmt.Errorf("no refresh_token for account %s", account.ID)
 	}

@@ -298,6 +298,24 @@ class ClipV2ResultSchema(BaseModel):
     profile_type:    str   = Field(..., description="Content profile used")
 
 
+class HistoricalAnalytics(BaseModel):
+    """Historical retention aggregates used by the learning-aware predictor."""
+    sample_size: int = Field(default=0, ge=0, description="Number of historical clips used")
+    baseline_retention: float = Field(default=0.0, ge=0.0, le=1.0, description="Historical retention baseline (0-1)")
+    duration_bucket_retention: Dict[str, float] = Field(
+        default_factory=dict,
+        description="Historical retention by duration bucket: short|medium|long (0-1)",
+    )
+    category_retention: Dict[str, float] = Field(
+        default_factory=dict,
+        description="Historical retention by category/profile label (0-1)",
+    )
+    hook_type_retention: Dict[str, float] = Field(
+        default_factory=dict,
+        description="Historical retention by hook type (0-1)",
+    )
+
+
 class ClipGenerateV2Request(BaseModel):
     """Request body for the V2 clip generation endpoint."""
     video_id: str
@@ -314,6 +332,10 @@ class ClipGenerateV2Request(BaseModel):
     )
     min_clip_score: int = Field(default=50, ge=0, le=100)
     max_clips: int      = Field(default=10, ge=1, le=30)
+    historical_analytics: Optional[HistoricalAnalytics] = Field(
+        default=None,
+        description="Optional historical analytics aggregates to improve retention prediction",
+    )
 
 
 class ClipGenerateV2Response(BaseModel):

@@ -19,7 +19,7 @@ Five signals are combined:
 from __future__ import annotations
 
 import re
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from loguru import logger
 
@@ -28,6 +28,15 @@ _QUESTION_RE = re.compile(r"\?")
 _EXCLAMATION_RE = re.compile(r"!")
 _SENTENCE_RE = re.compile(r"[.!?]+")
 _WORD_RE = re.compile(r"\b[a-zA-Z]{2,}\b")
+
+_LEARN_BASELINE_WEIGHT = 0.35
+_LEARN_DURATION_WEIGHT = 0.25
+_LEARN_CATEGORY_WEIGHT = 0.20
+_LEARN_HOOK_WEIGHT = 0.20
+_MAX_HISTORY_CONFIDENCE = 0.45
+# A sample size of ~200 already provides a stable retention baseline here,
+# so additional history should not keep increasing model influence linearly.
+_HISTORY_CONFIDENCE_SAMPLE_SCALE = 200.0
 
 
 class RetentionPredictor:
@@ -49,6 +58,9 @@ class RetentionPredictor:
         min_duration: float,
         max_duration: float,
         has_hook: bool = False,
+        category: str = "general",
+        hook_types: Optional[Sequence[str]] = None,
+        historical_analytics: Optional[Dict[str, Any]] = None,
     ) -> int:
         """Return a retention score in [0, 100] for a clip window.
 
@@ -80,10 +92,18 @@ class RetentionPredictor:
         variety_s  = self._sentence_variety_score(text)
 
         raw = duration_s + density_s + qa_s + hook_s + variety_s
-        s = max(0, min(100, round(raw)))
+        learned_s = self._historical_score(
+            duration=duration,
+            category=category,
+            hook_types=hook_types or [],
+            historical_analytics=historical_analytics or {},
+        )
+        confidence = self._historical_confidence(historical_analytics or {})
+        blended = raw if learned_s is None else ((1.0 - confidence) * raw) + (confidence * learned_s)
+        s = max(0, min(100, round(blended)))
         logger.debug(
-            "RetentionPredictor: dur={:.1f}s dur_s={:.1f} dens={:.1f} qa={:.1f} hook={} var={:.1f} → {}",
-            duration, duration_s, density_s, qa_s, has_hook, variety_s, s,
+            "RetentionPredictor: dur={:.1f}s dur_s={:.1f} dens={:.1f} qa={:.1f} hook={} var={:.1f} learned={} conf={:.2f} → {}",
+            duration, duration_s, density_s, qa_s, has_hook, variety_s, learned_s, confidence, s,
         )
         return s
 
@@ -127,3 +147,68 @@ class RetentionPredictor:
         max_len = max(lengths)
         variety = (max_len - min_len) / max(max_len, 1)
         return min(10.0, variety * 10.0)
+
+    def _historical_score(
+        self,
+        duration: float,
+        category: str,
+        hook_types: Sequence[str],
+        historical_analytics: Dict[str, Any],
+    ) -> Optional[float]:
+        baseline = self._safe_ratio(historical_analytics.get("baseline_retention"))
+        if baseline is None:
+            return None
+
+        duration_ret = self._lookup_duration_retention(duration, historical_analytics.get("duration_bucket_retention"))
+        category_ret = self._lookup_map_retention(category, historical_analytics.get("category_retention"))
+        hook_ret = self._lookup_hook_retention(hook_types, historical_analytics.get("hook_type_retention"))
+
+        duration_ret = baseline if duration_ret is None else duration_ret
+        category_ret = baseline if category_ret is None else category_ret
+        hook_ret = baseline if hook_ret is None else hook_ret
+
+        learned_ratio = (
+            (baseline * _LEARN_BASELINE_WEIGHT)
+            + (duration_ret * _LEARN_DURATION_WEIGHT)
+            + (category_ret * _LEARN_CATEGORY_WEIGHT)
+            + (hook_ret * _LEARN_HOOK_WEIGHT)
+        )
+        return max(0.0, min(100.0, learned_ratio * 100.0))
+
+    def _historical_confidence(self, historical_analytics: Dict[str, Any]) -> float:
+        sample_size = historical_analytics.get("sample_size", 0)
+        if not isinstance(sample_size, (int, float)) or sample_size <= 0:
+            return 0.0
+        # Cap historical influence to keep text-signal heuristics dominant.
+        return min(_MAX_HISTORY_CONFIDENCE, float(sample_size) / _HISTORY_CONFIDENCE_SAMPLE_SCALE)
+
+    def _lookup_duration_retention(self, duration: float, duration_map: Any) -> Optional[float]:
+        if not isinstance(duration_map, dict):
+            return None
+        bucket = "short" if duration < 30 else ("medium" if duration <= 60 else "long")
+        return self._safe_ratio(duration_map.get(bucket))
+
+    def _lookup_map_retention(self, key: str, values: Any) -> Optional[float]:
+        if not isinstance(values, dict):
+            return None
+        lookup = str(key or "").strip().lower()
+        if lookup == "":
+            return None
+        return self._safe_ratio(values.get(lookup))
+
+    def _lookup_hook_retention(self, hook_types: Sequence[str], hook_map: Any) -> Optional[float]:
+        if not isinstance(hook_map, dict) or not hook_types:
+            return None
+        ratios: List[float] = []
+        for hook_type in hook_types:
+            ratio = self._safe_ratio(hook_map.get(str(hook_type).strip().lower()))
+            if ratio is not None:
+                ratios.append(ratio)
+        if not ratios:
+            return None
+        return sum(ratios) / len(ratios)
+
+    def _safe_ratio(self, value: Any) -> Optional[float]:
+        if isinstance(value, (int, float)):
+            return max(0.0, min(1.0, float(value)))
+        return None

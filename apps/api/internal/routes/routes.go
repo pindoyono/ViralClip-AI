@@ -50,7 +50,7 @@ func Register(srv *server.Server) {
 	authHandler := handlers.NewAuthHandler(srv.DB, jwtManager)
 	videoHandler := handlers.NewVideoHandler(srv.DB, storageSvc, queuePublisher).WithHub(srv.Hub)
 	clipHandler := handlers.NewClipHandler(srv.DB)
-	socialHandler := handlers.NewSocialHandler(srv.DB)
+	socialHandler := handlers.NewSocialHandler(srv.DB, srv.Redis)
 	analyticsHandler := handlers.NewAnalyticsHandler(srv.DB)
 	trendingHandler := handlers.NewTrendingHandler(srv.DB)
 	contentProfileHandler := handlers.NewContentProfileHandler(srv.DB)

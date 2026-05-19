@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"context"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
 
@@ -16,12 +18,13 @@ import (
 
 // SocialHandler handles social media account operations.
 type SocialHandler struct {
-	db *gorm.DB
+	db    *gorm.DB
+	redis *redis.Client
 }
 
 // NewSocialHandler creates a new SocialHandler.
-func NewSocialHandler(db *gorm.DB) *SocialHandler {
-	return &SocialHandler{db: db}
+func NewSocialHandler(db *gorm.DB, rdb *redis.Client) *SocialHandler {
+	return &SocialHandler{db: db, redis: rdb}
 }
 
 // ListAccounts returns all connected social accounts for the user.
@@ -267,6 +270,7 @@ func (h *SocialHandler) ListScheduledPosts(c *fiber.Ctx) error {
 			PlatformPostURL: p.PlatformPostURL,
 			Status:          p.Status,
 			ErrorMessage:    p.ErrorMessage,
+			UploadProgress:  h.loadUploadProgress(context.Background(), p.ID.String(), p.UploadProgress),
 			CreatedAt:       p.CreatedAt,
 		}
 		if p.Clip.ID != uuid.Nil {
@@ -328,6 +332,7 @@ func (h *SocialHandler) PublishStatus(c *fiber.Ctx) error {
 			PlatformPostURL: post.PlatformPostURL,
 			Status:          post.Status,
 			ErrorMessage:    post.ErrorMessage,
+			UploadProgress:  h.loadUploadProgress(context.Background(), post.ID.String(), post.UploadProgress),
 			CreatedAt:       post.CreatedAt,
 		},
 		Logs: logResponses,
@@ -364,6 +369,7 @@ func (h *SocialHandler) createScheduledPostFromRequest(c *fiber.Ctx, userID stri
 		Caption:         req.Caption,
 		Hashtags:        req.Hashtags,
 		Status:          models.PostStatusScheduled,
+		UploadProgress:  0,
 	}
 	if post.PublishAt == nil {
 		post.PublishAt = &post.ScheduledAt
@@ -389,8 +395,28 @@ func (h *SocialHandler) createScheduledPostFromRequest(c *fiber.Ctx, userID stri
 		Caption:         post.Caption,
 		Hashtags:        post.Hashtags,
 		Status:          post.Status,
+		UploadProgress:  post.UploadProgress,
 		CreatedAt:       post.CreatedAt,
 	})
+}
+
+const publishUploadProgressKeyPrefix = "upload:progress:"
+
+func (h *SocialHandler) loadUploadProgress(ctx context.Context, postID string, fallback int) int {
+	if h.redis == nil || postID == "" {
+		return fallback
+	}
+	progress, err := h.redis.Get(ctx, publishUploadProgressKeyPrefix+postID).Int()
+	if err != nil {
+		return fallback
+	}
+	if progress < 0 {
+		return 0
+	}
+	if progress > 100 {
+		return 100
+	}
+	return progress
 }
 
 // CancelScheduledPost cancels a scheduled post.
