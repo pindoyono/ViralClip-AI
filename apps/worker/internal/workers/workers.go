@@ -262,19 +262,21 @@ func (w *VideoProcessingWorker) markVideoFailed(videoID, errMsg string) {
 
 // PublishingWorker handles scheduled social media post publishing.
 type PublishingWorker struct {
-	db         *gorm.DB
-	redis      *redis.Client
-	httpClient *http.Client
-	maxRetries int
+	db           *gorm.DB
+	redis        *redis.Client
+	httpClient   *http.Client
+	maxRetries   int
+	tokenRefresh *TokenRefreshService
 }
 
 // NewPublishingWorker creates a new PublishingWorker.
 func NewPublishingWorker(db *gorm.DB, rdb *redis.Client) *PublishingWorker {
 	return &PublishingWorker{
-		db:         db,
-		redis:      rdb,
-		httpClient: &http.Client{Timeout: 60 * time.Second},
-		maxRetries: 3,
+		db:           db,
+		redis:        rdb,
+		httpClient:   &http.Client{Timeout: 60 * time.Second},
+		maxRetries:   3,
+		tokenRefresh: NewTokenRefreshService(db, rdb),
 	}
 }
 
@@ -371,21 +373,12 @@ func (w *PublishingWorker) ensureValidAccessToken(ctx context.Context, account *
 	if account.RefreshToken == "" {
 		return fmt.Errorf("access token expired and refresh_token is missing")
 	}
-
-	newToken := "refreshed_" + account.RefreshToken
-	exp := time.Now().UTC().Add(1 * time.Hour)
-	if err := w.db.WithContext(ctx).
-		Model(&SocialAccount{}).
-		Where("id = ?", account.ID).
-		Updates(map[string]interface{}{
-			"access_token": newToken,
-			"expires_at":   exp,
-			"updated_at":   time.Now().UTC(),
-		}).Error; err != nil {
-		return fmt.Errorf("refresh token update failed: %w", err)
+	if w.tokenRefresh == nil {
+		w.tokenRefresh = NewTokenRefreshService(w.db, w.redis)
 	}
-	account.AccessToken = newToken
-	account.TokenExpiresAt = &exp
+	if err := w.tokenRefresh.RefreshAccountToken(ctx, account); err != nil {
+		return fmt.Errorf("access token refresh failed: %w", err)
+	}
 	return nil
 }
 

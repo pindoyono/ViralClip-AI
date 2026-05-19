@@ -235,3 +235,33 @@ func TestTokenRefreshService_CancelledContext(t *testing.T) {
 		svc.RefreshExpiringTokens(ctx)
 	})
 }
+
+func TestTokenRefreshService_RefreshAccountToken_UpdatesDBAndInMemoryAccount(t *testing.T) {
+	db := setupTokenRefreshDB(t)
+	svc := NewTokenRefreshService(db, nil)
+
+	expiredAt := time.Now().UTC().Add(-1 * time.Minute)
+	require.NoError(t, db.Create(&SocialAccount{
+		ID:             "acc-single-refresh",
+		UserID:         "user-1",
+		Platform:       "youtube",
+		AccessToken:    "old-token",
+		RefreshToken:   "refresh-single",
+		TokenExpiresAt: &expiredAt,
+		IsActive:       true,
+	}).Error)
+
+	var account SocialAccount
+	require.NoError(t, db.First(&account, "id = ?", "acc-single-refresh").Error)
+
+	require.NoError(t, svc.RefreshAccountToken(context.Background(), &account))
+
+	assert.Contains(t, account.AccessToken, "refreshed_")
+	assert.NotNil(t, account.TokenExpiresAt)
+	assert.True(t, account.TokenExpiresAt.After(time.Now()))
+
+	var dbAccount SocialAccount
+	require.NoError(t, db.First(&dbAccount, "id = ?", "acc-single-refresh").Error)
+	assert.Equal(t, account.AccessToken, dbAccount.AccessToken)
+	assert.Equal(t, 0, dbAccount.TokenRefreshAttempts)
+}

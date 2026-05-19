@@ -82,18 +82,28 @@ func (s *TokenRefreshService) RefreshExpiringTokens(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		default:
-			s.refreshToken(ctx, account)
+			accountCopy := account
+			if err := s.RefreshAccountToken(ctx, &accountCopy); err != nil {
+				// Error is already logged and accounted for by RefreshAccountToken.
+				continue
+			}
 		}
 	}
 }
 
-func (s *TokenRefreshService) refreshToken(ctx context.Context, account SocialAccount) {
-	if account.RefreshToken == "" {
-		s.notifyFailure(ctx, account.ID, account.Platform, "missing refresh_token")
-		return
+// RefreshAccountToken refreshes a single social account token, persists the new
+// values in the database, and mutates the passed account pointer.
+func (s *TokenRefreshService) RefreshAccountToken(ctx context.Context, account *SocialAccount) error {
+	if account == nil {
+		return fmt.Errorf("social account is nil")
 	}
 
-	newToken, newExpiry, err := s.callPlatformRefresh(ctx, account)
+	if account.RefreshToken == "" {
+		s.notifyFailure(ctx, account.ID, account.Platform, "missing refresh_token")
+		return fmt.Errorf("missing refresh_token")
+	}
+
+	newToken, newExpiry, err := s.callPlatformRefresh(ctx, *account)
 	if err != nil {
 		log.Error().
 			Err(err).
@@ -114,28 +124,33 @@ func (s *TokenRefreshService) refreshToken(ctx context.Context, account SocialAc
 			log.Error().Err(dbErr).Str("account_id", account.ID).
 				Msg("TokenRefreshService: failed to increment token_refresh_attempts")
 		}
-		return
+		return err
 	}
 
 	if err := s.db.WithContext(ctx).
 		Table("social_accounts").
 		Where("id = ?", account.ID).
 		Updates(map[string]interface{}{
-			"access_token":            newToken,
-			"expires_at":              newExpiry,
-			"token_refresh_attempts":  0,
-			"updated_at":              time.Now().UTC(),
+			"access_token":           newToken,
+			"expires_at":             newExpiry,
+			"token_refresh_attempts": 0,
+			"updated_at":             time.Now().UTC(),
 		}).Error; err != nil {
 		log.Error().Err(err).Str("account_id", account.ID).
 			Msg("TokenRefreshService: failed to persist refreshed token")
-		return
+		return err
 	}
+
+	account.AccessToken = newToken
+	account.TokenExpiresAt = &newExpiry
+	account.TokenRefreshAttempts = 0
 
 	log.Info().
 		Str("account_id", account.ID).
 		Str("platform", account.Platform).
 		Time("new_expiry", newExpiry).
 		Msg("TokenRefreshService: token refreshed successfully")
+	return nil
 }
 
 // callPlatformRefresh calls the platform's OAuth token refresh endpoint.
