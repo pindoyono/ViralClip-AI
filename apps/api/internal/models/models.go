@@ -205,6 +205,7 @@ type ScheduledPost struct {
 	Status          PostStatus     `gorm:"default:'scheduled'" json:"status"`
 	ErrorMessage    string         `json:"error_message,omitempty"`
 	RetryCount      int            `gorm:"default:0" json:"retry_count"`
+	UploadProgress  int            `gorm:"default:0" json:"upload_progress"`
 
 	Clip          Clip            `gorm:"foreignKey:ClipID" json:"clip,omitempty"`
 	User          User            `gorm:"foreignKey:UserID" json:"user,omitempty"`
@@ -225,21 +226,21 @@ type PublishingLog struct {
 // ClipAnalytics stores performance metrics for published clips.
 type ClipAnalytics struct {
 	Base
-	ClipID          uuid.UUID      `gorm:"type:uuid;not null;index" json:"clip_id"`
-	PostID          *uuid.UUID     `gorm:"type:uuid;index" json:"post_id,omitempty"`
-	Platform        SocialPlatform `json:"platform"`
-	RecordedAt      time.Time      `gorm:"not null" json:"recorded_at"`
-	Views           int64          `json:"views"`
-	Likes           int64          `json:"likes"`
-	Comments        int64          `json:"comments"`
-	Shares          int64          `json:"shares"`
-	Saves           int64          `json:"saves"`
-	Reach           int64          `json:"reach"`
-	Impressions     int64          `json:"impressions"`
-	EngagementRate  float64        `json:"engagement_rate"`
-	WatchTime       float64        `json:"watch_time"`       // average watch time in seconds
-	CTR             float64        `gorm:"default:0" json:"ctr"`              // click-through rate (0–1)
-	SubscriberGain  int64          `gorm:"default:0" json:"subscriber_gain"`  // net new subscribers from this clip
+	ClipID         uuid.UUID      `gorm:"type:uuid;not null;index" json:"clip_id"`
+	PostID         *uuid.UUID     `gorm:"type:uuid;index" json:"post_id,omitempty"`
+	Platform       SocialPlatform `json:"platform"`
+	RecordedAt     time.Time      `gorm:"not null" json:"recorded_at"`
+	Views          int64          `json:"views"`
+	Likes          int64          `json:"likes"`
+	Comments       int64          `json:"comments"`
+	Shares         int64          `json:"shares"`
+	Saves          int64          `json:"saves"`
+	Reach          int64          `json:"reach"`
+	Impressions    int64          `json:"impressions"`
+	EngagementRate float64        `json:"engagement_rate"`
+	WatchTime      float64        `json:"watch_time"`                       // average watch time in seconds
+	CTR            float64        `gorm:"default:0" json:"ctr"`             // click-through rate (0–1)
+	SubscriberGain int64          `gorm:"default:0" json:"subscriber_gain"` // net new subscribers from this clip
 
 	Clip Clip           `gorm:"foreignKey:ClipID" json:"clip,omitempty"`
 	Post *ScheduledPost `gorm:"foreignKey:PostID" json:"post,omitempty"`

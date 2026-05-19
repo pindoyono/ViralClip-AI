@@ -84,6 +84,13 @@ func TestSchedulerWorker_EnqueueDuePosts(t *testing.T) {
 	var updated ScheduledPost
 	require.NoError(t, db.First(&updated, "id = ?", "sched-1").Error)
 	assert.Equal(t, "publishing", updated.Status)
+	assert.Equal(t, 0, updated.UploadProgress)
+
+	var logs []PublishingLog
+	require.NoError(t, db.Where("post_id = ?", "sched-1").Find(&logs).Error)
+	require.Len(t, logs, 1)
+	assert.Equal(t, "publishing", logs[0].Status)
+	assert.Equal(t, "post queued for publishing", logs[0].Message)
 }
 
 func TestPublishingWorker_ProcessScheduledPosts_Success(t *testing.T) {
@@ -219,6 +226,63 @@ func TestPublishingWorker_ProcessScheduledPosts_RetriesWhenNoToken(t *testing.T)
 	assert.Equal(t, "scheduled", post.Status)
 	assert.Equal(t, 1, post.RetryCount)
 	assert.NotEmpty(t, post.ErrorMessage)
+}
+
+func TestSchedulerAndPublishingWorkers_EndToEnd(t *testing.T) {
+	db := setupWorkerDB(t)
+	scheduler := NewSchedulerWorker(db, nil)
+	publisher := NewPublishingWorker(db, nil)
+
+	exp := time.Now().UTC().Add(1 * time.Hour)
+	require.NoError(t, db.Create(&SocialAccount{
+		ID:             "acc-e2e",
+		UserID:         "user-1",
+		Platform:       "tiktok",
+		AccessToken:    "token-ok",
+		RefreshToken:   "refresh-ok",
+		TokenExpiresAt: &exp,
+		IsActive:       true,
+	}).Error)
+	require.NoError(t, db.Create(&Clip{
+		ID:          "clip-e2e",
+		VideoID:     "video-e2e",
+		UserID:      "user-1",
+		Status:      "ready",
+		StorageURL:  "https://storage.example.com/clip-e2e.mp4",
+		StoragePath: "/storage/clip-e2e.mp4",
+	}).Error)
+
+	dueAt := time.Now().UTC().Add(-1 * time.Minute)
+	require.NoError(t, db.Create(&ScheduledPost{
+		ID:              "post-e2e",
+		ClipID:          "clip-e2e",
+		UserID:          "user-1",
+		SocialAccountID: "acc-e2e",
+		Platform:        "tiktok",
+		ScheduledAt:     dueAt,
+		PublishAt:       &dueAt,
+		Status:          "scheduled",
+		CreatedAt:       dueAt,
+		UpdatedAt:       dueAt,
+	}).Error)
+
+	scheduler.EnqueueDuePosts(context.Background())
+	publisher.ProcessScheduledPosts(context.Background())
+
+	var post ScheduledPost
+	require.NoError(t, db.First(&post, "id = ?", "post-e2e").Error)
+	assert.Equal(t, "published", post.Status)
+	assert.NotNil(t, post.PublishedAt)
+	assert.NotEmpty(t, post.PlatformPostID)
+	assert.NotEmpty(t, post.PlatformPostURL)
+	assert.Equal(t, 100, post.UploadProgress)
+
+	var logs []PublishingLog
+	require.NoError(t, db.Where("post_id = ?", "post-e2e").Order("created_at ASC").Find(&logs).Error)
+	require.Len(t, logs, 3)
+	assert.Equal(t, "post queued for publishing", logs[0].Message)
+	assert.Equal(t, "publishing started", logs[1].Message)
+	assert.Equal(t, "post published successfully", logs[2].Message)
 }
 
 // --- CleanupWorker ---

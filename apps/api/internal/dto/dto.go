@@ -243,6 +243,7 @@ type ScheduledPostResponse struct {
 	PlatformPostURL string                `json:"platform_post_url,omitempty"`
 	Status          models.PostStatus     `json:"status"`
 	ErrorMessage    string                `json:"error_message,omitempty"`
+	UploadProgress  int                   `json:"upload_progress"`
 	CreatedAt       time.Time             `json:"created_at"`
 	Clip            *ClipResponse         `json:"clip,omitempty"`
 }

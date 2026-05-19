@@ -2,15 +2,18 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
@@ -37,9 +40,9 @@ func setupSocialPublishDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func setupSocialPublishApp(db *gorm.DB, userID string) *fiber.App {
+func setupSocialPublishApp(db *gorm.DB, rdb *redis.Client, userID string) *fiber.App {
 	app := fiber.New()
-	h := NewSocialHandler(db)
+	h := NewSocialHandler(db, rdb)
 
 	app.Use(func(c *fiber.Ctx) error {
 		if userID != "" {
@@ -104,10 +107,18 @@ func seedReadyClipAndAccount(t *testing.T, db *gorm.DB, userID uuid.UUID) (uuid.
 	return clipID, accountID
 }
 
+func newSocialPublishRedis(t *testing.T) (*redis.Client, *miniredis.Miniredis) {
+	t.Helper()
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	return rdb, mr
+}
+
 func TestSocialConnectAndDisconnectAlias(t *testing.T) {
 	db := setupSocialPublishDB(t)
 	userID := uuid.New().String()
-	app := setupSocialPublishApp(db, userID)
+	app := setupSocialPublishApp(db, nil, userID)
 
 	connectPayload := map[string]any{
 		"platform": "tiktok",
@@ -136,7 +147,9 @@ func TestSocialConnectAndDisconnectAlias(t *testing.T) {
 func TestPublishAndPublishStatusEndpoints(t *testing.T) {
 	db := setupSocialPublishDB(t)
 	userID := uuid.New()
-	app := setupSocialPublishApp(db, userID.String())
+	rdb, mr := newSocialPublishRedis(t)
+	defer mr.Close()
+	app := setupSocialPublishApp(db, rdb, userID.String())
 	clipID, accountID := seedReadyClipAndAccount(t, db, userID)
 
 	publishPayload := map[string]any{
@@ -162,6 +175,7 @@ func TestPublishAndPublishStatusEndpoints(t *testing.T) {
 		Status:  models.PostStatusPublishing,
 		Message: "publishing started",
 	}).Error)
+	require.NoError(t, rdb.Set(context.Background(), "upload:progress:"+postID, 67, time.Minute).Err())
 
 	statusReq, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/publish/status?post_id=%s", postID), nil)
 	statusResp, err := app.Test(statusReq)
@@ -172,5 +186,6 @@ func TestPublishAndPublishStatusEndpoints(t *testing.T) {
 	require.NoError(t, json.NewDecoder(statusResp.Body).Decode(&statusBody))
 	data := statusBody["data"].(map[string]any)
 	assert.Equal(t, postID, data["post"].(map[string]any)["id"])
+	assert.Equal(t, float64(67), data["post"].(map[string]any)["upload_progress"])
 	assert.Len(t, data["logs"].([]any), 1)
 }

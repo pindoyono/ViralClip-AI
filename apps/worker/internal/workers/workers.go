@@ -375,13 +375,15 @@ func (w *PublishingWorker) failPostWithRetry(ctx context.Context, post Scheduled
 	status := "scheduled"
 	msg := fmt.Sprintf("publish failed: %s", reason)
 	nextPublishAt := time.Now().UTC().Add(time.Duration(nextRetryCount*2) * time.Minute)
+	setUploadProgress(ctx, w.redis, post.ID, 0)
 	updates := map[string]interface{}{
-		"retry_count":   nextRetryCount,
-		"error_message": reason,
-		"updated_at":    time.Now().UTC(),
-		"publish_at":    nextPublishAt,
-		"scheduled_at":  nextPublishAt,
-		"status":        status,
+		"retry_count":     nextRetryCount,
+		"error_message":   reason,
+		"updated_at":      time.Now().UTC(),
+		"publish_at":      nextPublishAt,
+		"scheduled_at":    nextPublishAt,
+		"status":          status,
+		"upload_progress": 0,
 	}
 	if nextRetryCount >= w.maxRetries {
 		updates["status"] = "failed"
@@ -394,6 +396,10 @@ func (w *PublishingWorker) failPostWithRetry(ctx context.Context, post Scheduled
 }
 
 func (w *PublishingWorker) createPublishingLog(ctx context.Context, postID, status, message string) error {
+	return createPublishingLogRecord(ctx, w.db, postID, status, message)
+}
+
+func createPublishingLogRecord(ctx context.Context, db *gorm.DB, postID, status, message string) error {
 	now := time.Now().UTC()
 	rec := PublishingLog{
 		ID:        newUUID(),
@@ -403,7 +409,7 @@ func (w *PublishingWorker) createPublishingLog(ctx context.Context, postID, stat
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	return w.db.WithContext(ctx).Create(&rec).Error
+	return db.WithContext(ctx).Create(&rec).Error
 }
 
 // SchedulerWorker transitions due posts into the publishing queue/state.
@@ -430,12 +436,18 @@ func (w *SchedulerWorker) EnqueueDuePosts(ctx context.Context) {
 	}
 
 	for _, post := range posts {
+		now := time.Now().UTC()
 		if err := w.db.WithContext(ctx).Model(&ScheduledPost{}).Where("id = ?", post.ID).Updates(map[string]interface{}{
-			"status":     "publishing",
-			"updated_at": time.Now().UTC(),
+			"status":          "publishing",
+			"upload_progress": 0,
+			"updated_at":      now,
 		}).Error; err != nil {
 			log.Error().Err(err).Str("post_id", post.ID).Msg("SchedulerWorker: failed to transition post to publishing")
 			continue
+		}
+		setUploadProgress(ctx, w.redis, post.ID, 0)
+		if err := createPublishingLogRecord(ctx, w.db, post.ID, "publishing", "post queued for publishing"); err != nil {
+			log.Error().Err(err).Str("post_id", post.ID).Msg("SchedulerWorker: failed to create publishing log")
 		}
 		log.Info().Str("post_id", post.ID).Msg("SchedulerWorker: queued post for publishing")
 	}

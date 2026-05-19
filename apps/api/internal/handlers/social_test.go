@@ -31,7 +31,7 @@ func setupSocialDB(t *testing.T) *gorm.DB {
 
 func setupSocialApp(db *gorm.DB, userID string) (*fiber.App, *SocialHandler) {
 	app := fiber.New()
-	h := NewSocialHandler(db)
+	h := NewSocialHandler(db, nil)
 
 	app.Use(func(c *fiber.Ctx) error {
 		if userID != "" {
