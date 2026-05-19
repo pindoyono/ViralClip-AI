@@ -16,13 +16,16 @@ const uploadProgressKeyPrefix = "upload:progress:"
 // the upload completes (provides a short window for the client to poll).
 const uploadProgressTTL = time.Hour
 
-// idPrefix returns the first n characters of s, or all of s if it is shorter.
+// idPrefix returns the first n characters of s, or all of s if it is shorter
+// than n.  Used to generate stable, readable platform post ID prefixes.
 func idPrefix(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
 	return s[:n]
 }
+
+// PlatformUploader performs the actual video upload to a social media platform.
 // Each implementation is responsible for updating upload progress in Redis as
 // the upload advances, so the client can poll GET /publish/status for live feedback.
 type PlatformUploader interface {
