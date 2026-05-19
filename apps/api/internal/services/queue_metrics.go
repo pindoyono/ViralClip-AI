@@ -51,9 +51,9 @@ type QueueSizeMetric struct {
 
 // FailedJobStats aggregates database-side failed job counters.
 type FailedJobStats struct {
-	TotalFailed    int64 `json:"total_failed"`
+	TotalFailed     int64 `json:"total_failed"`
 	TotalRecovering int64 `json:"total_recovering"`
-	TotalExhausted int64 `json:"total_exhausted"`
+	TotalExhausted  int64 `json:"total_exhausted"`
 }
 
 // QueueStatusReport is the payload returned by GET /queue/status.
