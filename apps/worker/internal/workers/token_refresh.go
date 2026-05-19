@@ -16,6 +16,10 @@ const (
 	// Refreshing 15 minutes early gives the PublishingWorker fresh tokens to use.
 	tokenRefreshWindow = 15 * time.Minute
 
+	// tokenUploadSafetyWindow is the minimum remaining token validity required
+	// before upload starts; tokens expiring within this window are refreshed.
+	tokenUploadSafetyWindow = 30 * time.Second
+
 	// tokenRefreshFailureChannel is the Redis Pub/Sub channel where refresh
 	// failures are published so monitoring dashboards and alerting can react.
 	tokenRefreshFailureChannel = "token:refresh:failures"
@@ -103,7 +107,7 @@ func (s *TokenRefreshService) EnsureValidAccessToken(ctx context.Context, accoun
 	now := time.Now().UTC()
 	// Keep using the current token only if expiry is known and still safe.
 	// Unknown expiry (nil) is treated as unsafe and triggers a refresh.
-	if account.TokenExpiresAt != nil && account.TokenExpiresAt.After(now.Add(30*time.Second)) {
+	if account.TokenExpiresAt != nil && account.TokenExpiresAt.After(now.Add(tokenUploadSafetyWindow)) {
 		return nil
 	}
 
