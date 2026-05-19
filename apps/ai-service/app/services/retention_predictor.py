@@ -34,6 +34,8 @@ _LEARN_DURATION_WEIGHT = 0.25
 _LEARN_CATEGORY_WEIGHT = 0.20
 _LEARN_HOOK_WEIGHT = 0.20
 _MAX_HISTORY_CONFIDENCE = 0.45
+# A sample size of ~200 already provides a stable retention baseline here,
+# so additional history should not keep increasing model influence linearly.
 _HISTORY_CONFIDENCE_SAMPLE_SCALE = 200.0
 
 

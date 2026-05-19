@@ -23,6 +23,16 @@ import (
 	"github.com/pindoyono/viralclip-ai/apps/api/internal/utils"
 )
 
+const clipV2HistoricalBaseSelect = `
+c.duration AS duration,
+ca.watch_time AS watch_time,
+COALESCE(cp.niche, cp.name, 'general') AS profile`
+
+const clipV2HistoricalHookSelect = `
+LOWER(hd.hook_type) AS hook_type,
+MAX(c.duration) AS duration,
+AVG(ca.watch_time) AS watch_time`
+
 // ClipHandlerV2 handles Dynamic Clip Engine V2 requests.
 type ClipHandlerV2 struct {
 	db       *gorm.DB
@@ -255,9 +265,7 @@ func (h *ClipHandlerV2) buildHistoricalAnalytics(ctx context.Context, userID str
 	var rows []baseRow
 	if err := h.db.WithContext(ctx).
 		Table("clip_analytics ca").
-		Select(`c.duration AS duration,
-			ca.watch_time AS watch_time,
-			COALESCE(cp.niche, cp.name, 'general') AS profile`).
+		Select(clipV2HistoricalBaseSelect).
 		Joins("JOIN clips c ON c.id = ca.clip_id").
 		Joins("JOIN videos v ON v.id = c.video_id").
 		Joins("LEFT JOIN content_profiles cp ON cp.id = v.content_profile_id").
@@ -343,9 +351,7 @@ func (h *ClipHandlerV2) buildHistoricalAnalytics(ctx context.Context, userID str
 	var hookRows []hookRow
 	if err := h.db.WithContext(ctx).
 		Table("hook_detections hd").
-		Select(`LOWER(hd.hook_type) AS hook_type,
-			MAX(c.duration) AS duration,
-			AVG(ca.watch_time) AS watch_time`).
+		Select(clipV2HistoricalHookSelect).
 		Joins("JOIN videos v ON v.id = hd.video_id").
 		Joins("JOIN clips c ON c.video_id = v.id AND c.deleted_at IS NULL").
 		Joins("JOIN clip_analytics ca ON ca.clip_id = c.id").

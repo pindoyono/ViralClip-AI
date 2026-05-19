@@ -81,16 +81,16 @@ func (s *TokenRefreshService) RefreshExpiringTokens(ctx context.Context) {
 
 	log.Info().Int("count", len(accounts)).Msg("TokenRefreshService: refreshing expiring tokens")
 
-	for i := range accounts {
+	for idx := range accounts {
 		select {
 		case <-ctx.Done():
 			return
 		default:
-			if err := s.refreshToken(ctx, &accounts[i]); err != nil {
+			if err := s.refreshToken(ctx, &accounts[idx]); err != nil {
 				log.Warn().
 					Err(err).
-					Str("account_id", accounts[i].ID).
-					Str("platform", accounts[i].Platform).
+					Str("account_id", accounts[idx].ID).
+					Str("platform", accounts[idx].Platform).
 					Msg("TokenRefreshService: failed refreshing expiring token")
 			}
 		}
@@ -151,10 +151,10 @@ func (s *TokenRefreshService) refreshToken(ctx context.Context, account *SocialA
 		Table("social_accounts").
 		Where("id = ?", account.ID).
 		Updates(map[string]interface{}{
-			"access_token":            newToken,
-			"expires_at":              newExpiry,
-			"token_refresh_attempts":  0,
-			"updated_at":              time.Now().UTC(),
+			"access_token":           newToken,
+			"expires_at":             newExpiry,
+			"token_refresh_attempts": 0,
+			"updated_at":             time.Now().UTC(),
 		}).Error; err != nil {
 		log.Error().Err(err).Str("account_id", account.ID).
 			Msg("TokenRefreshService: failed to persist refreshed token")
