@@ -101,6 +101,15 @@ func TestPublishingWorker_ProcessScheduledPosts_Success(t *testing.T) {
 		IsActive:       true,
 	}).Error)
 
+	require.NoError(t, db.Create(&Clip{
+		ID:          "clip-1",
+		VideoID:     "video-1",
+		UserID:      "user-1",
+		Status:      "ready",
+		StorageURL:  "https://storage.example.com/clip-1.mp4",
+		StoragePath: "/storage/clip-1.mp4",
+	}).Error)
+
 	now := time.Now().UTC()
 	require.NoError(t, db.Create(&ScheduledPost{
 		ID:              "post-1",
@@ -140,6 +149,15 @@ func TestPublishingWorker_ProcessScheduledPosts_RefreshesExpiredToken(t *testing
 		RefreshToken:   "refresh-xyz",
 		TokenExpiresAt: &expired,
 		IsActive:       true,
+	}).Error)
+
+	require.NoError(t, db.Create(&Clip{
+		ID:          "clip-1",
+		VideoID:     "video-1",
+		UserID:      "user-1",
+		Status:      "ready",
+		StorageURL:  "https://storage.example.com/clip-1.mp4",
+		StoragePath: "/storage/clip-1.mp4",
 	}).Error)
 
 	now := time.Now().UTC()

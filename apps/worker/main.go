@@ -70,6 +70,7 @@ func main() {
 	// Time-based workers retained for their specific scheduling needs.
 	schedulerWorker := workers.NewSchedulerWorker(db, rdb)
 	publishingWorker := workers.NewPublishingWorker(db, rdb)
+	tokenRefreshService := workers.NewTokenRefreshService(db, rdb)
 	cleanupWorker := workers.NewCleanupWorker(db, rdb)
 	analyticsWorker := workers.NewAnalyticsWorker(db, rdb)
 	trendCollectorWorker := trends.NewTrendCollectorWorker(
@@ -146,6 +147,25 @@ func main() {
 				return
 			case <-ticker.C:
 				publishingWorker.ProcessScheduledPosts(ctx)
+			}
+		}
+	}()
+
+	// Token refresh loop (every 15 minutes — proactive OAuth token renewal)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// Run once immediately on startup to refresh any tokens that expired
+		// while the worker was down, then repeat on the regular interval.
+		tokenRefreshService.RefreshExpiringTokens(ctx)
+		ticker := time.NewTicker(15 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				tokenRefreshService.RefreshExpiringTokens(ctx)
 			}
 		}
 	}()
