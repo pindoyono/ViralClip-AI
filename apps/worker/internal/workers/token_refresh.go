@@ -82,15 +82,34 @@ func (s *TokenRefreshService) RefreshExpiringTokens(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		default:
-			s.refreshToken(ctx, account)
+			if err := s.refreshToken(ctx, account); err != nil {
+				log.Debug().
+					Err(err).
+					Str("account_id", account.ID).
+					Msg("TokenRefreshService: refresh attempt completed with error")
+			}
 		}
 	}
 }
 
-func (s *TokenRefreshService) refreshToken(ctx context.Context, account SocialAccount) {
+// RefreshAccountToken refreshes a single account token immediately.
+// This is used by PublishingWorker as a safety net when an expired token is
+// encountered during an upload attempt.
+func (s *TokenRefreshService) RefreshAccountToken(ctx context.Context, accountID string) error {
+	var account SocialAccount
+	if err := s.db.WithContext(ctx).
+		Where("id = ? AND is_active = ?", accountID, true).
+		First(&account).Error; err != nil {
+		return fmt.Errorf("failed to load account for refresh: %w", err)
+	}
+	return s.refreshToken(ctx, account)
+}
+
+func (s *TokenRefreshService) refreshToken(ctx context.Context, account SocialAccount) error {
 	if account.RefreshToken == "" {
 		s.notifyFailure(ctx, account.ID, account.Platform, "missing refresh_token")
-		return
+		s.incrementRefreshAttempts(ctx, account.ID)
+		return fmt.Errorf("access token expired and refresh_token is missing")
 	}
 
 	newToken, newExpiry, err := s.callPlatformRefresh(ctx, account)
@@ -101,34 +120,24 @@ func (s *TokenRefreshService) refreshToken(ctx context.Context, account SocialAc
 			Str("platform", account.Platform).
 			Msg("TokenRefreshService: platform refresh call failed")
 		s.notifyFailure(ctx, account.ID, account.Platform, err.Error())
-
-		// Increment the retry counter so operators can identify accounts that
-		// consistently fail and may need manual intervention.
-		if dbErr := s.db.WithContext(ctx).
-			Table("social_accounts").
-			Where("id = ?", account.ID).
-			Updates(map[string]interface{}{
-				"token_refresh_attempts": gorm.Expr("COALESCE(token_refresh_attempts, 0) + 1"),
-				"updated_at":             time.Now().UTC(),
-			}).Error; dbErr != nil {
-			log.Error().Err(dbErr).Str("account_id", account.ID).
-				Msg("TokenRefreshService: failed to increment token_refresh_attempts")
-		}
-		return
+		s.incrementRefreshAttempts(ctx, account.ID)
+		return fmt.Errorf("platform refresh call failed: %w", err)
 	}
 
 	if err := s.db.WithContext(ctx).
 		Table("social_accounts").
 		Where("id = ?", account.ID).
 		Updates(map[string]interface{}{
-			"access_token":            newToken,
-			"expires_at":              newExpiry,
-			"token_refresh_attempts":  0,
-			"updated_at":              time.Now().UTC(),
+			"access_token":           newToken,
+			"expires_at":             newExpiry,
+			"token_refresh_attempts": 0,
+			"updated_at":             time.Now().UTC(),
 		}).Error; err != nil {
 		log.Error().Err(err).Str("account_id", account.ID).
 			Msg("TokenRefreshService: failed to persist refreshed token")
-		return
+		s.notifyFailure(ctx, account.ID, account.Platform, "failed to persist refreshed token")
+		s.incrementRefreshAttempts(ctx, account.ID)
+		return fmt.Errorf("failed to persist refreshed token: %w", err)
 	}
 
 	log.Info().
@@ -136,6 +145,22 @@ func (s *TokenRefreshService) refreshToken(ctx context.Context, account SocialAc
 		Str("platform", account.Platform).
 		Time("new_expiry", newExpiry).
 		Msg("TokenRefreshService: token refreshed successfully")
+	return nil
+}
+
+func (s *TokenRefreshService) incrementRefreshAttempts(ctx context.Context, accountID string) {
+	// Increment the retry counter so operators can identify accounts that
+	// consistently fail and may need manual intervention.
+	if dbErr := s.db.WithContext(ctx).
+		Table("social_accounts").
+		Where("id = ?", accountID).
+		Updates(map[string]interface{}{
+			"token_refresh_attempts": gorm.Expr("COALESCE(token_refresh_attempts, 0) + 1"),
+			"updated_at":             time.Now().UTC(),
+		}).Error; dbErr != nil {
+		log.Error().Err(dbErr).Str("account_id", accountID).
+			Msg("TokenRefreshService: failed to increment token_refresh_attempts")
+	}
 }
 
 // callPlatformRefresh calls the platform's OAuth token refresh endpoint.

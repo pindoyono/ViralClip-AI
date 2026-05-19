@@ -262,19 +262,21 @@ func (w *VideoProcessingWorker) markVideoFailed(videoID, errMsg string) {
 
 // PublishingWorker handles scheduled social media post publishing.
 type PublishingWorker struct {
-	db         *gorm.DB
-	redis      *redis.Client
-	httpClient *http.Client
-	maxRetries int
+	db                  *gorm.DB
+	redis               *redis.Client
+	httpClient          *http.Client
+	maxRetries          int
+	tokenRefreshService *TokenRefreshService
 }
 
 // NewPublishingWorker creates a new PublishingWorker.
 func NewPublishingWorker(db *gorm.DB, rdb *redis.Client) *PublishingWorker {
 	return &PublishingWorker{
-		db:         db,
-		redis:      rdb,
-		httpClient: &http.Client{Timeout: 60 * time.Second},
-		maxRetries: 3,
+		db:                  db,
+		redis:               rdb,
+		httpClient:          &http.Client{Timeout: 60 * time.Second},
+		maxRetries:          3,
+		tokenRefreshService: NewTokenRefreshService(db, rdb),
 	}
 }
 
@@ -368,24 +370,21 @@ func (w *PublishingWorker) ensureValidAccessToken(ctx context.Context, account *
 	if account.TokenExpiresAt == nil || account.TokenExpiresAt.After(time.Now().UTC().Add(30*time.Second)) {
 		return nil
 	}
-	if account.RefreshToken == "" {
-		return fmt.Errorf("access token expired and refresh_token is missing")
+
+	if err := w.tokenRefreshService.RefreshAccountToken(ctx, account.ID); err != nil {
+		return err
 	}
 
-	newToken := "refreshed_" + account.RefreshToken
-	exp := time.Now().UTC().Add(1 * time.Hour)
-	if err := w.db.WithContext(ctx).
-		Model(&SocialAccount{}).
-		Where("id = ?", account.ID).
-		Updates(map[string]interface{}{
-			"access_token": newToken,
-			"expires_at":   exp,
-			"updated_at":   time.Now().UTC(),
-		}).Error; err != nil {
-		return fmt.Errorf("refresh token update failed: %w", err)
+	var refreshed SocialAccount
+	if err := w.db.WithContext(ctx).Where("id = ?", account.ID).First(&refreshed).Error; err != nil {
+		return fmt.Errorf("failed to reload refreshed social account: %w", err)
 	}
-	account.AccessToken = newToken
-	account.TokenExpiresAt = &exp
+	account.AccessToken = refreshed.AccessToken
+	account.TokenExpiresAt = refreshed.TokenExpiresAt
+
+	if account.AccessToken == "" {
+		return fmt.Errorf("refreshed access token is empty")
+	}
 	return nil
 }
 

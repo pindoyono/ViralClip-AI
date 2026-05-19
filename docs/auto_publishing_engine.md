@@ -348,8 +348,9 @@ TokenRefreshService (every 15 min)
   └─▶ on failure: increments token_refresh_attempts, publishes to Redis
 
 PublishingWorker (inline safety net)
-  └─▶ ensureValidAccessToken: if token is expired → refresh inline
-  └─▶ continues with updated token
+  └─▶ ensureValidAccessToken: if token is expired → delegate to TokenRefreshService.RefreshAccountToken
+  └─▶ TokenRefreshService updates social_accounts.access_token + expires_at
+  └─▶ PublishingWorker reloads updated token and continues upload
   └─▶ on failure: failPostWithRetry
 ```
 

@@ -221,6 +221,58 @@ func TestPublishingWorker_ProcessScheduledPosts_RetriesWhenNoToken(t *testing.T)
 	assert.NotEmpty(t, post.ErrorMessage)
 }
 
+func TestPublishingWorker_ProcessScheduledPosts_ExpiredTokenWithoutRefresh_RetriesAndCountsAttempt(t *testing.T) {
+	db := setupWorkerDB(t)
+	w := NewPublishingWorker(db, nil)
+
+	expired := time.Now().UTC().Add(-1 * time.Minute)
+	require.NoError(t, db.Create(&SocialAccount{
+		ID:                   "acc-expired-no-refresh",
+		UserID:               "user-1",
+		Platform:             "youtube",
+		AccessToken:          "expired-token",
+		RefreshToken:         "",
+		TokenExpiresAt:       &expired,
+		IsActive:             true,
+		TokenRefreshAttempts: 0,
+	}).Error)
+
+	require.NoError(t, db.Create(&Clip{
+		ID:          "clip-expired-no-refresh",
+		VideoID:     "video-1",
+		UserID:      "user-1",
+		Status:      "ready",
+		StorageURL:  "https://storage.example.com/clip-1.mp4",
+		StoragePath: "/storage/clip-1.mp4",
+	}).Error)
+
+	now := time.Now().UTC()
+	require.NoError(t, db.Create(&ScheduledPost{
+		ID:              "post-expired-no-refresh",
+		ClipID:          "clip-expired-no-refresh",
+		UserID:          "user-1",
+		SocialAccountID: "acc-expired-no-refresh",
+		Platform:        "youtube",
+		ScheduledAt:     now,
+		PublishAt:       &now,
+		Status:          "publishing",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}).Error)
+
+	w.ProcessScheduledPosts(context.Background())
+
+	var post ScheduledPost
+	require.NoError(t, db.First(&post, "id = ?", "post-expired-no-refresh").Error)
+	assert.Equal(t, "scheduled", post.Status)
+	assert.Equal(t, 1, post.RetryCount)
+	assert.Contains(t, post.ErrorMessage, "refresh_token is missing")
+
+	var account SocialAccount
+	require.NoError(t, db.First(&account, "id = ?", "acc-expired-no-refresh").Error)
+	assert.Equal(t, 1, account.TokenRefreshAttempts)
+}
+
 // --- CleanupWorker ---
 
 func TestNewCleanupWorker(t *testing.T) {

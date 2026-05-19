@@ -235,3 +235,28 @@ func TestTokenRefreshService_CancelledContext(t *testing.T) {
 		svc.RefreshExpiringTokens(ctx)
 	})
 }
+
+func TestTokenRefreshService_RefreshAccountToken_MissingRefreshTokenIncrementsAttempts(t *testing.T) {
+	db := setupTokenRefreshDB(t)
+	svc := NewTokenRefreshService(db, nil)
+
+	expiredAt := time.Now().UTC().Add(-1 * time.Minute)
+	require.NoError(t, db.Create(&SocialAccount{
+		ID:                   "acc-direct-refresh-no-rt",
+		UserID:               "user-1",
+		Platform:             "tiktok",
+		AccessToken:          "expired-token",
+		RefreshToken:         "",
+		TokenExpiresAt:       &expiredAt,
+		IsActive:             true,
+		TokenRefreshAttempts: 0,
+	}).Error)
+
+	err := svc.RefreshAccountToken(context.Background(), "acc-direct-refresh-no-rt")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "refresh_token is missing")
+
+	var account SocialAccount
+	require.NoError(t, db.First(&account, "id = ?", "acc-direct-refresh-no-rt").Error)
+	assert.Equal(t, 1, account.TokenRefreshAttempts)
+}
