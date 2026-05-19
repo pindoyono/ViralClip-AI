@@ -29,6 +29,13 @@ _EXCLAMATION_RE = re.compile(r"!")
 _SENTENCE_RE = re.compile(r"[.!?]+")
 _WORD_RE = re.compile(r"\b[a-zA-Z]{2,}\b")
 
+_LEARN_BASELINE_WEIGHT = 0.35
+_LEARN_DURATION_WEIGHT = 0.25
+_LEARN_CATEGORY_WEIGHT = 0.20
+_LEARN_HOOK_WEIGHT = 0.20
+_MAX_HISTORY_CONFIDENCE = 0.45
+_HISTORY_CONFIDENCE_SAMPLE_SCALE = 200.0
+
 
 class RetentionPredictor:
     """Predict viewer retention for a clip window.
@@ -158,7 +165,12 @@ class RetentionPredictor:
         category_ret = baseline if category_ret is None else category_ret
         hook_ret = baseline if hook_ret is None else hook_ret
 
-        learned_ratio = (baseline * 0.35) + (duration_ret * 0.25) + (category_ret * 0.20) + (hook_ret * 0.20)
+        learned_ratio = (
+            (baseline * _LEARN_BASELINE_WEIGHT)
+            + (duration_ret * _LEARN_DURATION_WEIGHT)
+            + (category_ret * _LEARN_CATEGORY_WEIGHT)
+            + (hook_ret * _LEARN_HOOK_WEIGHT)
+        )
         return max(0.0, min(100.0, learned_ratio * 100.0))
 
     def _historical_confidence(self, historical_analytics: Dict[str, Any]) -> float:
@@ -166,7 +178,7 @@ class RetentionPredictor:
         if not isinstance(sample_size, (int, float)) or sample_size <= 0:
             return 0.0
         # Cap historical influence to keep text-signal heuristics dominant.
-        return min(0.45, float(sample_size) / 200.0)
+        return min(_MAX_HISTORY_CONFIDENCE, float(sample_size) / _HISTORY_CONFIDENCE_SAMPLE_SCALE)
 
     def _lookup_duration_retention(self, duration: float, duration_map: Any) -> Optional[float]:
         if not isinstance(duration_map, dict):

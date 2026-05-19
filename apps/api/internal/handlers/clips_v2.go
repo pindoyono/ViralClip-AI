@@ -247,23 +247,20 @@ func (h *ClipHandlerV2) Generate(c *fiber.Ctx) error {
 }
 
 func (h *ClipHandlerV2) buildHistoricalAnalytics(ctx context.Context, userID string, profileType string) map[string]interface{} {
-	type row struct {
+	type baseRow struct {
 		Duration  float64
 		WatchTime float64
 		Profile   string
-		HookType  string
 	}
-	var rows []row
+	var rows []baseRow
 	if err := h.db.WithContext(ctx).
 		Table("clip_analytics ca").
 		Select(`c.duration AS duration,
 			ca.watch_time AS watch_time,
-			COALESCE(cp.niche, cp.name, 'general') AS profile,
-			COALESCE(hd.hook_type, '') AS hook_type`).
+			COALESCE(cp.niche, cp.name, 'general') AS profile`).
 		Joins("JOIN clips c ON c.id = ca.clip_id").
 		Joins("JOIN videos v ON v.id = c.video_id").
 		Joins("LEFT JOIN content_profiles cp ON cp.id = v.content_profile_id").
-		Joins("LEFT JOIN hook_detections hd ON hd.video_id = v.id").
 		Where("v.user_id = ? AND c.deleted_at IS NULL", userID).
 		Scan(&rows).Error; err != nil {
 		log.Warn().Err(err).Str("user_id", userID).Msg("Failed to build historical analytics for ClipV2")
@@ -280,8 +277,6 @@ func (h *ClipHandlerV2) buildHistoricalAnalytics(ctx context.Context, userID str
 	durationCounts := map[string]int{"short": 0, "medium": 0, "long": 0}
 	categorySums := map[string]float64{}
 	categoryCounts := map[string]int{}
-	hookSums := map[string]float64{}
-	hookCounts := map[string]int{}
 
 	for _, row := range rows {
 		if row.Duration <= 0 {
@@ -313,12 +308,6 @@ func (h *ClipHandlerV2) buildHistoricalAnalytics(ctx context.Context, userID str
 		}
 		categorySums[category] += retention
 		categoryCounts[category]++
-
-		hookType := strings.TrimSpace(strings.ToLower(row.HookType))
-		if hookType != "" {
-			hookSums[hookType] += retention
-			hookCounts[hookType]++
-		}
 	}
 
 	if baselineCount == 0 {
@@ -344,6 +333,47 @@ func (h *ClipHandlerV2) buildHistoricalAnalytics(ctx context.Context, userID str
 		if _, ok := categoryRetention[profileType]; !ok {
 			categoryRetention[profileType] = baselineSum / float64(baselineCount)
 		}
+	}
+
+	type hookRow struct {
+		HookType  string
+		Duration  float64
+		WatchTime float64
+	}
+	var hookRows []hookRow
+	if err := h.db.WithContext(ctx).
+		Table("hook_detections hd").
+		Select(`LOWER(hd.hook_type) AS hook_type,
+			MAX(c.duration) AS duration,
+			AVG(ca.watch_time) AS watch_time`).
+		Joins("JOIN videos v ON v.id = hd.video_id").
+		Joins("JOIN clips c ON c.video_id = v.id AND c.deleted_at IS NULL").
+		Joins("JOIN clip_analytics ca ON ca.clip_id = c.id").
+		Where("v.user_id = ?", userID).
+		Group("LOWER(hd.hook_type), c.id").
+		Scan(&hookRows).Error; err != nil {
+		log.Warn().Err(err).Str("user_id", userID).Msg("Failed to build hook-type historical analytics for ClipV2")
+	}
+
+	hookSums := map[string]float64{}
+	hookCounts := map[string]int{}
+	for _, row := range hookRows {
+		if row.Duration <= 0 {
+			continue
+		}
+		retention := row.WatchTime / row.Duration
+		if retention < 0 {
+			retention = 0
+		}
+		if retention > 1 {
+			retention = 1
+		}
+		hookType := strings.TrimSpace(strings.ToLower(row.HookType))
+		if hookType == "" {
+			continue
+		}
+		hookSums[hookType] += retention
+		hookCounts[hookType]++
 	}
 
 	hookRetention := map[string]float64{}
