@@ -62,6 +62,13 @@ func Register(srv *server.Server) {
 	viralOpportunityService := services.NewViralOpportunityService(srv.DB, services.NewRecommendationEngine())
 	viralOpportunityHandler := handlers.NewViralOpportunityHandler(viralOpportunityService)
 
+	// Queue metrics handler (requires Redis).
+	var queueHandler *handlers.QueueHandler
+	if srv.Redis != nil {
+		queueMetricsSvc := services.NewQueueMetricsService(srv.DB, srv.Redis)
+		queueHandler = handlers.NewQueueHandler(queueMetricsSvc)
+	}
+
 	// Start the Redis Pub/Sub → WebSocket broadcaster in the background.
 	if srv.Redis != nil {
 		broadcaster := handlers.NewStatusBroadcaster(srv.Redis, srv.Hub, srv.DB)
@@ -179,6 +186,14 @@ func Register(srv *server.Server) {
 	contentProfiles.Post("/", contentProfileHandler.Create)
 	contentProfiles.Patch("/:id", contentProfileHandler.Update)
 	contentProfiles.Delete("/:id", contentProfileHandler.Delete)
+
+	// Queue monitoring routes (protected — operators/admins only in production).
+	if queueHandler != nil {
+		queueGroup := v1.Group("/queue")
+		queueGroup.Get("/status", queueHandler.Status)
+		queueGroup.Get("/failed", queueHandler.Failed)
+		queueGroup.Get("/retry", queueHandler.Retry)
+	}
 
 	// Catch-all 404
 	app.Use(func(c *fiber.Ctx) error {

@@ -225,19 +225,21 @@ type PublishingLog struct {
 // ClipAnalytics stores performance metrics for published clips.
 type ClipAnalytics struct {
 	Base
-	ClipID         uuid.UUID      `gorm:"type:uuid;not null;index" json:"clip_id"`
-	PostID         *uuid.UUID     `gorm:"type:uuid;index" json:"post_id,omitempty"`
-	Platform       SocialPlatform `json:"platform"`
-	RecordedAt     time.Time      `gorm:"not null" json:"recorded_at"`
-	Views          int64          `json:"views"`
-	Likes          int64          `json:"likes"`
-	Comments       int64          `json:"comments"`
-	Shares         int64          `json:"shares"`
-	Saves          int64          `json:"saves"`
-	Reach          int64          `json:"reach"`
-	Impressions    int64          `json:"impressions"`
-	EngagementRate float64        `json:"engagement_rate"`
-	WatchTime      float64        `json:"watch_time"` // average watch time in seconds
+	ClipID          uuid.UUID      `gorm:"type:uuid;not null;index" json:"clip_id"`
+	PostID          *uuid.UUID     `gorm:"type:uuid;index" json:"post_id,omitempty"`
+	Platform        SocialPlatform `json:"platform"`
+	RecordedAt      time.Time      `gorm:"not null" json:"recorded_at"`
+	Views           int64          `json:"views"`
+	Likes           int64          `json:"likes"`
+	Comments        int64          `json:"comments"`
+	Shares          int64          `json:"shares"`
+	Saves           int64          `json:"saves"`
+	Reach           int64          `json:"reach"`
+	Impressions     int64          `json:"impressions"`
+	EngagementRate  float64        `json:"engagement_rate"`
+	WatchTime       float64        `json:"watch_time"`       // average watch time in seconds
+	CTR             float64        `gorm:"default:0" json:"ctr"`              // click-through rate (0–1)
+	SubscriberGain  int64          `gorm:"default:0" json:"subscriber_gain"`  // net new subscribers from this clip
 
 	Clip Clip           `gorm:"foreignKey:ClipID" json:"clip,omitempty"`
 	Post *ScheduledPost `gorm:"foreignKey:PostID" json:"post,omitempty"`
@@ -279,6 +281,37 @@ type ViralOpportunity struct {
 	OutlierScore    float64   `gorm:"not null;default:0" json:"outlier_score"`
 	GrowthScore     float64   `gorm:"not null;default:0" json:"growth_score"`
 	ViralScore      float64   `gorm:"not null;default:0;index" json:"viral_score"`
+}
+
+// FailedJobStatus tracks the recovery lifecycle of a dead-letter job.
+type FailedJobStatus string
+
+const (
+	FailedJobStatusPending    FailedJobStatus = "pending"
+	FailedJobStatusRecovering FailedJobStatus = "recovering"
+	FailedJobStatusExhausted  FailedJobStatus = "exhausted"
+)
+
+// FailedJob persists dead-letter queue entries for inspection and recovery.
+type FailedJob struct {
+	ID           uuid.UUID       `gorm:"type:varchar(36);primaryKey" json:"id"`
+	JobID        string          `gorm:"not null;index" json:"job_id"`
+	QueueName    string          `gorm:"not null;index" json:"queue_name"`
+	Payload      string          `gorm:"type:text;not null" json:"payload"`
+	ErrorMessage string          `gorm:"type:text" json:"error_message"`
+	RetryCount   int             `gorm:"not null;default:0" json:"retry_count"`
+	MaxRetries   int             `gorm:"not null;default:3" json:"max_retries"`
+	Status       FailedJobStatus `gorm:"not null;default:'pending'" json:"status"`
+	LastRetryAt  *time.Time      `json:"last_retry_at,omitempty"`
+	CreatedAt    time.Time       `json:"created_at"`
+	UpdatedAt    time.Time       `json:"updated_at"`
+}
+
+func (f *FailedJob) BeforeCreate(tx *gorm.DB) error {
+	if f.ID == uuid.Nil {
+		f.ID = uuid.New()
+	}
+	return nil
 }
 
 // HookDetection stores a detected hook moment from the V2 Hook Engine.

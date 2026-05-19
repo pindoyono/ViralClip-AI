@@ -54,6 +54,12 @@ func main() {
 	// Shared status publisher for real-time WebSocket notifications.
 	statusPub := workers.NewStatusPublisher(rdb)
 
+	// Dead-letter queue worker: reads from DLQs and persists to failed_jobs.
+	deadLetterWorker := workers.NewDeadLetterWorker(db, queueCli)
+
+	// Recovery worker: polls failed_jobs and re-queues eligible entries.
+	recoveryWorker := workers.NewRecoveryWorker(db, queueCli, cfg.Worker.MaxRetries)
+
 	// Queue-based pipeline workers (replace the old DB polling loop).
 	transcriptWorker := workers.NewTranscriptWorker(db, queueCli, cfg.AI.ServiceURL, cfg.Worker.MaxRetries).WithStatusPublisher(statusPub)
 	clipWorker := workers.NewClipWorker(db, queueCli, cfg.AI.ServiceURL, cfg.Worker.MaxRetries).WithStatusPublisher(statusPub)
@@ -64,6 +70,7 @@ func main() {
 	// Time-based workers retained for their specific scheduling needs.
 	schedulerWorker := workers.NewSchedulerWorker(db, rdb)
 	publishingWorker := workers.NewPublishingWorker(db, rdb)
+	tokenRefreshService := workers.NewTokenRefreshService(db, rdb)
 	cleanupWorker := workers.NewCleanupWorker(db, rdb)
 	analyticsWorker := workers.NewAnalyticsWorker(db, rdb)
 	trendCollectorWorker := trends.NewTrendCollectorWorker(
@@ -96,6 +103,20 @@ func main() {
 	startQueueWorker("upload", uploadWorker.Start)
 	startQueueWorker("analytics_queue", analyticsQueueWorker.Start)
 
+	// Dead-letter queue consumer (single goroutine — fans out internally).
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		deadLetterWorker.Start(ctx)
+	}()
+
+	// Recovery worker (single goroutine — periodic poll loop).
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		recoveryWorker.Start(ctx)
+	}()
+
 	// --- Time-based worker goroutines ---
 
 	// Scheduler loop (every 30 seconds)
@@ -126,6 +147,25 @@ func main() {
 				return
 			case <-ticker.C:
 				publishingWorker.ProcessScheduledPosts(ctx)
+			}
+		}
+	}()
+
+	// Token refresh loop (every 15 minutes — proactive OAuth token renewal)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// Run once immediately on startup to refresh any tokens that expired
+		// while the worker was down, then repeat on the regular interval.
+		tokenRefreshService.RefreshExpiringTokens(ctx)
+		ticker := time.NewTicker(15 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				tokenRefreshService.RefreshExpiringTokens(ctx)
 			}
 		}
 	}()

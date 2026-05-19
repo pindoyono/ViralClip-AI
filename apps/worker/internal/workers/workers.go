@@ -78,6 +78,7 @@ type ScheduledPost struct {
 	ErrorMessage    string     `json:"error_message"`
 	PlatformPostID  string     `json:"platform_post_id"`
 	PlatformPostURL string     `json:"platform_post_url"`
+	UploadProgress  int        `gorm:"default:0" json:"upload_progress"`
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
 }
@@ -86,15 +87,16 @@ func (ScheduledPost) TableName() string { return "scheduled_posts" }
 
 // SocialAccount is a minimal worker-side representation of a connected account.
 type SocialAccount struct {
-	ID             string     `gorm:"primaryKey" json:"id"`
-	UserID         string     `json:"user_id"`
-	Platform       string     `json:"platform"`
-	AccessToken    string     `json:"access_token"`
-	RefreshToken   string     `json:"refresh_token"`
-	TokenExpiresAt *time.Time `gorm:"column:expires_at" json:"expires_at"`
-	IsActive       bool       `json:"is_active"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID                   string     `gorm:"primaryKey" json:"id"`
+	UserID               string     `json:"user_id"`
+	Platform             string     `json:"platform"`
+	AccessToken          string     `json:"access_token"`
+	RefreshToken         string     `json:"refresh_token"`
+	TokenExpiresAt       *time.Time `gorm:"column:expires_at" json:"expires_at"`
+	IsActive             bool       `json:"is_active"`
+	TokenRefreshAttempts int        `gorm:"default:0" json:"token_refresh_attempts"`
+	CreatedAt            time.Time  `json:"created_at"`
+	UpdatedAt            time.Time  `json:"updated_at"`
 }
 
 func (SocialAccount) TableName() string { return "social_accounts" }
@@ -132,6 +134,23 @@ type ClipAnalytics struct {
 }
 
 func (ClipAnalytics) TableName() string { return "clip_analytics" }
+
+// FailedJobRecord mirrors the API's FailedJob model for worker-side DB access.
+type FailedJobRecord struct {
+	ID           string     `gorm:"primaryKey" json:"id"`
+	JobID        string     `gorm:"index;not null" json:"job_id"`
+	QueueName    string     `gorm:"not null" json:"queue_name"`
+	Payload      string     `json:"payload"`
+	ErrorMessage string     `json:"error_message"`
+	RetryCount   int        `gorm:"not null;default:0" json:"retry_count"`
+	MaxRetries   int        `gorm:"not null;default:3" json:"max_retries"`
+	Status       string     `gorm:"not null;default:'pending'" json:"status"`
+	LastRetryAt  *time.Time `json:"last_retry_at"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
+func (FailedJobRecord) TableName() string { return "failed_jobs" }
 
 // newUUID generates a random UUID v4 string without external dependencies.
 func newUUID() string {
@@ -307,15 +326,29 @@ func (w *PublishingWorker) publishPost(ctx context.Context, postID string) {
 		return
 	}
 
+	// Load the clip so the uploader can access the storage path / URL.
+	var clip Clip
+	if err := w.db.WithContext(ctx).Where("id = ?", post.ClipID).First(&clip).Error; err != nil {
+		w.failPostWithRetry(ctx, post, fmt.Sprintf("clip not found: %v", err))
+		return
+	}
+
+	// Delegate the actual upload to the platform-specific uploader.
+	uploader := uploaderForPlatform(post.Platform, w.redis)
+	platformPostID, platformPostURL, uploadErr := uploader.Upload(ctx, post, account, clip)
+	if uploadErr != nil {
+		w.failPostWithRetry(ctx, post, fmt.Sprintf("upload failed: %v", uploadErr))
+		return
+	}
+
 	now := time.Now()
-	platformPostID := fmt.Sprintf("%s-%s", post.Platform, post.ID)
-	platformPostURL := fmt.Sprintf("https://%s.example.com/post/%s", post.Platform, platformPostID)
 	if err := w.db.WithContext(ctx).Table("scheduled_posts").Where("id = ?", postID).Updates(map[string]interface{}{
 		"status":            "published",
 		"published_at":      now,
 		"retry_count":       post.RetryCount,
 		"platform_post_id":  platformPostID,
 		"platform_post_url": platformPostURL,
+		"upload_progress":   100,
 		"error_message":     "",
 		"updated_at":        now,
 	}).Error; err != nil {

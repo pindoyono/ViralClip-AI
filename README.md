@@ -24,6 +24,7 @@
 - 🔐 **JWT Authentication** — Secure token-based auth with refresh token rotation
 - 📦 **Subscription Tiers** — Free / Starter / Pro / Enterprise with Stripe integration
 - 🐳 **Production-Ready** — Docker Compose + Kubernetes manifests included
+- 🔁 **Dead Letter Queue** — Failed jobs persisted to DB with exponential back-off recovery via `DeadLetterWorker` + `RecoveryWorker`
 
 ---
 
@@ -248,6 +249,63 @@ pnpm dev
 
 ---
 
+## Dead Letter Queue + Recovery Worker
+
+### Architecture Decisions
+
+- **Existing DLQ mechanism** in `apps/worker/internal/queue/queue.go` already pushes failed jobs to `{queue}:dead` Redis lists via `PushDead()`. Task 1 builds the persistence and recovery layer on top of this.
+- **DeadLetterWorker** (`apps/worker/internal/workers/dlq_worker.go`) spawns one consumer goroutine per monitored DLQ. It BLPOP-s dead jobs, serialises them and writes a `FailedJobRecord` to the `failed_jobs` table. Separation from `RecoveryWorker` keeps concerns clear and allows dead-letter inspection before any recovery attempt.
+- **RecoveryWorker** (`apps/worker/internal/workers/recovery_worker.go`) polls the `failed_jobs` table every 30 s. It uses **exponential back-off** (`2^retryCount × 30 s`, capped at 1 hour) so transient failures don't hammer the AI service. The worker-level `maxRetries` setting acts as a hard cap independent of any per-job value.
+- **QueueMetricsService** (`apps/api/internal/services/queue_metrics.go`) queries Redis LLEN for all queue and DLQ depths and counts `FailedJob` rows by status — no additional infrastructure required.
+- All error details are stored in the job's `Metadata["error"]` field before the `PushDead` call so the DeadLetterWorker can extract them without a round-trip.
+
+### API Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/v1/queue/status` | Yes | Live queue depths (Redis) + failed job aggregates (DB) |
+| `GET` | `/api/v1/queue/failed` | Yes | Paginated list of failed jobs; filterable by `queue` and `status` |
+| `GET` | `/api/v1/queue/retry` | Yes | Jobs currently eligible for recovery (pending/recovering) |
+
+### Directory Changes
+
+- `infrastructure/migrations/011_create_failed_jobs.sql` — `failed_jobs` table and indexes
+- `apps/worker/internal/workers/dlq_worker.go` — `DeadLetterWorker`
+- `apps/worker/internal/workers/dlq_worker_test.go` — DLQ worker unit tests
+- `apps/worker/internal/workers/recovery_worker.go` — `RecoveryWorker` with exponential back-off
+- `apps/worker/internal/workers/recovery_worker_test.go` — recovery worker unit tests
+- `apps/api/internal/models/models.go` — `FailedJob` model added
+- `apps/api/internal/services/queue_metrics.go` — `QueueMetricsService`
+- `apps/api/internal/services/queue_metrics_test.go` — metrics service tests
+- `apps/api/internal/handlers/queue.go` — `QueueHandler`
+- `apps/api/internal/handlers/queue_test.go` — handler integration tests
+
+### FailedJob Lifecycle
+
+```
+Job fails in worker
+      │
+      ▼
+handleJobFailure stores error in Metadata, calls PushDead
+      │
+      ▼
+{queue}:dead Redis list
+      │
+      ▼
+DeadLetterWorker reads DLQ → writes FailedJobRecord (status: pending)
+      │
+      ▼
+RecoveryWorker polls every 30 s
+  ├─ retry_count < max_retries → push back to original queue (status: recovering)
+  └─ retry_count >= max_retries → mark exhausted
+```
+
+### Migration
+
+Apply `infrastructure/migrations/011_create_failed_jobs.sql` before running the updated worker or API in production.
+
+---
+
 ## Viral Opportunity Collector
 
 ### Architecture Decisions
@@ -400,6 +458,7 @@ pnpm jest
 | `clip_analytics`   | Per-clip engagement metrics by platform             |
 | `trending_topics`  | Platform-wide trending content                      |
 | `hook_detections`  | **[V2]** Hook moments detected in video transcripts |
+| `failed_jobs`      | Dead-letter queue entries persisted for recovery    |
 
 ---
 

@@ -108,12 +108,17 @@ type Recommendation struct {
 // LearningEngine provides CPS calculation, pattern analysis, and
 // content-level recommendations from aggregated clip analytics.
 type LearningEngine struct {
-	db *gorm.DB
+	db              *gorm.DB
+	patternAnalyzer *PatternAnalyzer
 }
 
 // NewLearningEngine constructs a new LearningEngine.
 func NewLearningEngine(db *gorm.DB) *LearningEngine {
-	return &LearningEngine{db: db}
+	tracker := NewHookPerformanceTracker(db)
+	return &LearningEngine{
+		db:              db,
+		patternAnalyzer: NewPatternAnalyzer(tracker),
+	}
 }
 
 // TopClips returns the highest-CPS clips for a user, optionally filtered by platform.
@@ -146,100 +151,7 @@ func (e *LearningEngine) WorstClips(ctx context.Context, userID string, platform
 
 // HookPatterns returns aggregated CPS performance grouped by hook type.
 func (e *LearningEngine) HookPatterns(ctx context.Context, userID string, platform string) ([]HookPattern, error) {
-	type hookRow struct {
-		HookType string
-		ClipID   string
-		AvgViews float64
-		AvgLikes float64
-		AvgWT    float64
-		Duration float64
-		CTR      float64
-	}
-
-	// Join hook detections → clips → clip_analytics (aggregate per hook type + clip).
-	query := e.db.WithContext(ctx).
-		Table("hook_detections hd").
-		Select(`hd.hook_type AS hook_type,
-			hd.video_id AS clip_id,
-			AVG(ca.views) AS avg_views,
-			AVG(ca.likes) AS avg_likes,
-			AVG(ca.watch_time) AS avg_wt,
-			AVG(c.duration) AS duration,
-			AVG(0) AS ctr`).
-		Joins("JOIN videos v ON v.id = hd.video_id").
-		Joins("JOIN clips c ON c.video_id = v.id").
-		Joins("JOIN clip_analytics ca ON ca.clip_id = c.id").
-		Where("v.user_id = ?", userID).
-		Group("hd.hook_type, hd.video_id")
-
-	if platform != "" {
-		query = query.Where("ca.platform = ?", platform)
-	}
-
-	var rows []hookRow
-	if err := query.Scan(&rows).Error; err != nil {
-		return nil, err
-	}
-
-	// Aggregate per hook type.
-	type agg struct {
-		totalCPS float64
-		count    int
-		sumViews float64
-	}
-	byHook := make(map[string]*agg)
-	for _, r := range rows {
-		m := CPSMetrics{
-			Views:     int64(r.AvgViews),
-			Likes:     int64(r.AvgLikes),
-			WatchTime: r.AvgWT,
-			Duration:  r.Duration,
-			CTR:       r.CTR,
-		}
-		cps := ComputeCPS(m)
-		if _, ok := byHook[r.HookType]; !ok {
-			byHook[r.HookType] = &agg{}
-		}
-		byHook[r.HookType].totalCPS += cps
-		byHook[r.HookType].count++
-		byHook[r.HookType].sumViews += r.AvgViews
-	}
-
-	// Compute baseline (mean CPS across all hook types).
-	totalBaseline := 0.0
-	for _, a := range byHook {
-		if a.count > 0 {
-			totalBaseline += a.totalCPS / float64(a.count)
-		}
-	}
-	baseline := 0.0
-	if len(byHook) > 0 {
-		baseline = totalBaseline / float64(len(byHook))
-	}
-
-	patterns := make([]HookPattern, 0, len(byHook))
-	for hookType, a := range byHook {
-		avgCPS := 0.0
-		avgViews := 0.0
-		if a.count > 0 {
-			avgCPS = a.totalCPS / float64(a.count)
-			avgViews = a.sumViews / float64(a.count)
-		}
-		improvement := 0.0
-		if baseline > 0 {
-			improvement = math.Round(((avgCPS-baseline)/baseline)*1000) / 10 // 1 dp %
-		}
-		patterns = append(patterns, HookPattern{
-			HookType:    hookType,
-			AvgCPS:      math.Round(avgCPS*100) / 100,
-			ClipCount:   a.count,
-			AvgViews:    math.Round(avgViews),
-			Improvement: improvement,
-		})
-	}
-
-	sort.Slice(patterns, func(i, j int) bool { return patterns[i].AvgCPS > patterns[j].AvgCPS })
-	return patterns, nil
+	return e.patternAnalyzer.Analyze(ctx, userID, platform)
 }
 
 // Recommendations produces learning insights per content profile.
@@ -334,17 +246,19 @@ func (e *LearningEngine) Recommendations(ctx context.Context, userID string) ([]
 // and returns a flat list.
 func (e *LearningEngine) rankedClips(ctx context.Context, userID string, platform string) ([]ClipWithCPS, error) {
 	type row struct {
-		ClipID     string
-		Title      string
-		Platform   string
-		Views      int64
-		Likes      int64
-		Comments   int64
-		Shares     int64
-		Saves      int64
-		WatchTime  float64
-		Duration   float64
-		ViralScore float64
+		ClipID         string
+		Title          string
+		Platform       string
+		Views          int64
+		Likes          int64
+		Comments       int64
+		Shares         int64
+		Saves          int64
+		WatchTime      float64
+		Duration       float64
+		ViralScore     float64
+		CTR            float64
+		SubscriberGain int64
 	}
 
 	q := e.db.WithContext(ctx).
@@ -359,7 +273,9 @@ func (e *LearningEngine) rankedClips(ctx context.Context, userID string, platfor
 			SUM(ca.saves) AS saves,
 			AVG(ca.watch_time) AS watch_time,
 			MAX(c.duration) AS duration,
-			MAX(c.viral_score) AS viral_score`).
+			MAX(c.viral_score) AS viral_score,
+			AVG(ca.ctr) AS ctr,
+			SUM(ca.subscriber_gain) AS subscriber_gain`).
 		Joins("JOIN clips c ON c.id = ca.clip_id").
 		Where("c.user_id = ? AND c.deleted_at IS NULL", userID).
 		Group("ca.clip_id, c.title, ca.platform")
@@ -376,13 +292,15 @@ func (e *LearningEngine) rankedClips(ctx context.Context, userID string, platfor
 	out := make([]ClipWithCPS, 0, len(rows))
 	for _, r := range rows {
 		m := CPSMetrics{
-			Views:     r.Views,
-			WatchTime: r.WatchTime,
-			Duration:  r.Duration,
-			Likes:     r.Likes,
-			Comments:  r.Comments,
-			Shares:    r.Shares,
-			Saves:     r.Saves,
+			Views:          r.Views,
+			WatchTime:      r.WatchTime,
+			Duration:       r.Duration,
+			Likes:          r.Likes,
+			Comments:       r.Comments,
+			Shares:         r.Shares,
+			Saves:          r.Saves,
+			CTR:            r.CTR,
+			SubscriberGain: r.SubscriberGain,
 		}
 		cid, _ := uuid.Parse(r.ClipID)
 		out = append(out, ClipWithCPS{
