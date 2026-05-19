@@ -266,6 +266,7 @@ type PublishingWorker struct {
 	redis      *redis.Client
 	httpClient *http.Client
 	maxRetries int
+	tokenSvc   *TokenRefreshService
 }
 
 // NewPublishingWorker creates a new PublishingWorker.
@@ -275,6 +276,7 @@ func NewPublishingWorker(db *gorm.DB, rdb *redis.Client) *PublishingWorker {
 		redis:      rdb,
 		httpClient: &http.Client{Timeout: 60 * time.Second},
 		maxRetries: 3,
+		tokenSvc:   NewTokenRefreshService(db, rdb),
 	}
 }
 
@@ -362,31 +364,10 @@ func (w *PublishingWorker) publishPost(ctx context.Context, postID string) {
 }
 
 func (w *PublishingWorker) ensureValidAccessToken(ctx context.Context, account *SocialAccount) error {
-	if account.AccessToken == "" {
-		return fmt.Errorf("missing access token")
+	if w.tokenSvc == nil {
+		return fmt.Errorf("token refresh service is not initialized")
 	}
-	if account.TokenExpiresAt == nil || account.TokenExpiresAt.After(time.Now().UTC().Add(30*time.Second)) {
-		return nil
-	}
-	if account.RefreshToken == "" {
-		return fmt.Errorf("access token expired and refresh_token is missing")
-	}
-
-	newToken := "refreshed_" + account.RefreshToken
-	exp := time.Now().UTC().Add(1 * time.Hour)
-	if err := w.db.WithContext(ctx).
-		Model(&SocialAccount{}).
-		Where("id = ?", account.ID).
-		Updates(map[string]interface{}{
-			"access_token": newToken,
-			"expires_at":   exp,
-			"updated_at":   time.Now().UTC(),
-		}).Error; err != nil {
-		return fmt.Errorf("refresh token update failed: %w", err)
-	}
-	account.AccessToken = newToken
-	account.TokenExpiresAt = &exp
-	return nil
+	return w.tokenSvc.EnsureValidAccessToken(ctx, account)
 }
 
 func (w *PublishingWorker) failPostWithRetry(ctx context.Context, post ScheduledPost, reason string) {
