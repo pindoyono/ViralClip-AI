@@ -94,7 +94,7 @@ func (s *TokenRefreshService) RefreshExpiringTokens(ctx context.Context) {
 
 // RefreshAccountToken refreshes a single account token immediately.
 // This is used by PublishingWorker as a safety net when an expired token is
-// encountered during an upload attempt.
+// encountered during post publishing.
 func (s *TokenRefreshService) RefreshAccountToken(ctx context.Context, accountID string) error {
 	var account SocialAccount
 	if err := s.db.WithContext(ctx).
