@@ -385,6 +385,9 @@ func (w *PublishingWorker) ensureValidAccessToken(ctx context.Context, account *
 	if account.AccessToken == "" {
 		return fmt.Errorf("token refresh succeeded but returned empty access token")
 	}
+	if account.TokenExpiresAt == nil || !account.TokenExpiresAt.After(time.Now().UTC()) {
+		return fmt.Errorf("token refresh succeeded but returned invalid expiry")
+	}
 	return nil
 }
 

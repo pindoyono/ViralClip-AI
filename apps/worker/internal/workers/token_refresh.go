@@ -109,7 +109,7 @@ func (s *TokenRefreshService) refreshToken(ctx context.Context, account SocialAc
 	if account.RefreshToken == "" {
 		s.notifyFailure(ctx, account.ID, account.Platform, "missing refresh_token")
 		s.incrementRefreshAttempts(ctx, account.ID)
-		return fmt.Errorf("access token expired and refresh_token is missing")
+		return fmt.Errorf("cannot refresh token: refresh_token is missing")
 	}
 
 	newToken, newExpiry, err := s.callPlatformRefresh(ctx, account)
