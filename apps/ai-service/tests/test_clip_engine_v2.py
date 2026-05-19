@@ -243,6 +243,69 @@ class TestRetentionPredictor:
         score = predictor.score(long_text, 30.0, 15.0, 60.0, has_hook=True)
         assert score <= 100
 
+    def test_historical_analytics_influence_score(self, predictor):
+        baseline = predictor.score(
+            "Did you know this happened? Amazing!",
+            35.0,
+            15.0,
+            60.0,
+            has_hook=True,
+            category="gaming",
+            hook_types=["storytelling"],
+        )
+        with_history = predictor.score(
+            "Did you know this happened? Amazing!",
+            35.0,
+            15.0,
+            60.0,
+            has_hook=True,
+            category="gaming",
+            hook_types=["storytelling"],
+            historical_analytics={
+                "sample_size": 180,
+                "baseline_retention": 0.75,
+                "duration_bucket_retention": {"medium": 0.82},
+                "category_retention": {"gaming": 0.88},
+                "hook_type_retention": {"storytelling": 0.9},
+            },
+        )
+        assert with_history > baseline
+
+    def test_historical_analytics_supports_hook_type_matching(self, predictor):
+        storytelling_score = predictor.score(
+            "Interesting story with a twist!",
+            35.0,
+            15.0,
+            60.0,
+            has_hook=True,
+            category="education",
+            hook_types=["storytelling"],
+            historical_analytics={
+                "sample_size": 120,
+                "baseline_retention": 0.55,
+                "duration_bucket_retention": {"medium": 0.55},
+                "category_retention": {"education": 0.55},
+                "hook_type_retention": {"storytelling": 0.85, "cta": 0.45},
+            },
+        )
+        cta_score = predictor.score(
+            "Interesting story with a twist!",
+            35.0,
+            15.0,
+            60.0,
+            has_hook=True,
+            category="education",
+            hook_types=["cta"],
+            historical_analytics={
+                "sample_size": 120,
+                "baseline_retention": 0.55,
+                "duration_bucket_retention": {"medium": 0.55},
+                "category_retention": {"education": 0.55},
+                "hook_type_retention": {"storytelling": 0.85, "cta": 0.45},
+            },
+        )
+        assert storytelling_score > cta_score
+
 
 # ===========================================================================
 # ClipScoreCalculatorV2
@@ -566,3 +629,15 @@ class TestClipV2Endpoint:
         payload["profile_type"] = "unknown_profile"
         resp = client.post("/api/v1/clips/v2/generate", json=payload)
         assert resp.status_code == 422
+
+    def test_historical_analytics_payload_accepted(self, client):
+        payload = self._payload("gaming")
+        payload["historical_analytics"] = {
+            "sample_size": 150,
+            "baseline_retention": 0.7,
+            "duration_bucket_retention": {"short": 0.6, "medium": 0.75, "long": 0.65},
+            "category_retention": {"gaming": 0.8},
+            "hook_type_retention": {"storytelling": 0.78},
+        }
+        resp = client.post("/api/v1/clips/v2/generate", json=payload)
+        assert resp.status_code == 200

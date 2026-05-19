@@ -29,7 +29,7 @@ Output is a list of ClipV2Result with HH:MM:SS start/end strings.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
@@ -120,6 +120,7 @@ class ClipEngineV2:
         profile_type: str = "general",
         min_clip_score: int = 50,
         max_clips: int = 10,
+        historical_analytics: Optional[Dict[str, Any]] = None,
     ) -> List[ClipV2Result]:
         """Generate scored clip candidates from transcript segments.
 
@@ -163,11 +164,15 @@ class ClipEngineV2:
         #          (best hook score overlapping each segment)
         # ------------------------------------------------------------------
         hook_score_map: dict[int, float] = {}
+        hook_type_map: dict[int, set[str]] = {}
         for det in hook_detections:
             for idx, seg in enumerate(segments):
                 if seg.start < det.end and seg.end > det.start:
                     existing = hook_score_map.get(idx, 0.0)
                     hook_score_map[idx] = max(existing, float(det.score))
+                    if idx not in hook_type_map:
+                        hook_type_map[idx] = set()
+                    hook_type_map[idx].add(det.type.lower())
 
         # ------------------------------------------------------------------
         # Step 3 – identify anchor segments
@@ -196,7 +201,9 @@ class ClipEngineV2:
                 emotion_scores=emotion_scores,
                 story_scores=story_scores,
                 hook_score_map=hook_score_map,
+                hook_type_map=hook_type_map,
                 profile_type=profile_type,
+                historical_analytics=historical_analytics,
             )
             if result is not None:
                 candidates.append(result)
@@ -232,7 +239,9 @@ class ClipEngineV2:
         emotion_scores: list[int],
         story_scores: list[int],
         hook_score_map: dict[int, float],
+        hook_type_map: dict[int, set[str]],
         profile_type: str,
+        historical_analytics: Optional[Dict[str, Any]],
     ) -> Optional[ClipV2Result]:
         """Try to build a valid clip window starting at anchor_idx.
 
@@ -272,6 +281,13 @@ class ClipEngineV2:
         avg_story   = sum(story_scores[i]   for i in window_indices) / len(window_indices)
         best_hook   = max((hook_score_map.get(i, 0.0) for i in window_indices), default=0.0)
         has_hook    = best_hook > 0
+        hook_types = sorted(
+            {
+                hook_type
+                for i in window_indices
+                for hook_type in hook_type_map.get(i, set())
+            }
+        )
 
         min_d, max_d = PROFILE_DURATION_RULES.get(profile_type, PROFILE_DURATION_RULES["general"])
         retention = self._retention.score(
@@ -280,6 +296,9 @@ class ClipEngineV2:
             min_duration=min_d,
             max_duration=max_d,
             has_hook=has_hook,
+            category=profile_type,
+            hook_types=hook_types,
+            historical_analytics=historical_analytics,
         )
 
         composite = self._score.calculate(

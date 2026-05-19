@@ -54,6 +54,11 @@ async def generate_clips_v2(request: ClipGenerateV2Request) -> ClipGenerateV2Res
             profile_type=request.profile_type.value,
             min_clip_score=request.min_clip_score,
             max_clips=request.max_clips,
+            historical_analytics=(
+                request.historical_analytics.model_dump()
+                if request.historical_analytics is not None
+                else None
+            ),
         )
     except Exception as exc:
         logger.error("ClipV2 generation failed for {}: {}", request.video_id, exc)
