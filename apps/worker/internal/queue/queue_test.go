@@ -181,7 +181,7 @@ func TestMetrics_AllQueues(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(1), metrics[queue.QueueAnalytics])
-	assert.Equal(t, int64(1), metrics[queue.QueueClip+":dead"])
+	assert.Equal(t, int64(1), metrics[queue.QueueClipDLQ])
 	// All other queues should be 0.
 	assert.Equal(t, int64(0), metrics[queue.QueueTranscript])
 }

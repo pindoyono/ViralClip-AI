@@ -253,7 +253,7 @@ pnpm dev
 
 ### Architecture Decisions
 
-- **Existing DLQ mechanism** in `apps/worker/internal/queue/queue.go` already pushes failed jobs to `{queue}:dead` Redis lists via `PushDead()`. Task 1 builds the persistence and recovery layer on top of this.
+- **Existing DLQ mechanism** in `apps/worker/internal/queue/queue.go` pushes failed jobs to explicit Redis lists such as `transcript_dlq`, `clip_dlq`, `upload_dlq`, and `analytics_dlq` via `PushDead()`. Task 1 builds the persistence and recovery layer on top of this.
 - **DeadLetterWorker** (`apps/worker/internal/workers/dlq_worker.go`) spawns one consumer goroutine per monitored DLQ. It BLPOP-s dead jobs, serialises them and writes a `FailedJobRecord` to the `failed_jobs` table. Separation from `RecoveryWorker` keeps concerns clear and allows dead-letter inspection before any recovery attempt.
 - **RecoveryWorker** (`apps/worker/internal/workers/recovery_worker.go`) polls the `failed_jobs` table every 30 s. It uses **exponential back-off** (`2^retryCount × 30 s`, capped at 1 hour) so transient failures don't hammer the AI service. The worker-level `maxRetries` setting acts as a hard cap independent of any per-job value.
 - **QueueMetricsService** (`apps/api/internal/services/queue_metrics.go`) queries Redis LLEN for all queue and DLQ depths and counts `FailedJob` rows by status — no additional infrastructure required.
@@ -289,7 +289,7 @@ Job fails in worker
 handleJobFailure stores error in Metadata, calls PushDead
       │
       ▼
-{queue}:dead Redis list
+Explicit DLQ Redis list (`transcript_dlq`, `clip_dlq`, `subtitle_dlq`, `upload_dlq`, `analytics_dlq`)
       │
       ▼
 DeadLetterWorker reads DLQ → writes FailedJobRecord (status: pending)

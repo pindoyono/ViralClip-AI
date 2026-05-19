@@ -77,12 +77,13 @@ func TestQueueMetricsService_Status_EmptyQueues(t *testing.T) {
 	report, err := svc.Status(context.Background())
 	require.NoError(t, err)
 	assert.NotNil(t, report)
-	assert.Len(t, report.Queues, len(metricsQueueNames))
+	assert.Len(t, report.Queues, len(metricsQueueDefinitions))
 	assert.Equal(t, int64(0), report.FailedJobs.TotalFailed)
 
 	for _, q := range report.Queues {
 		assert.Equal(t, int64(0), q.PendingJobs)
 		assert.Equal(t, int64(0), q.DeadJobs)
+		assert.NotEmpty(t, q.DeadLetterQueue)
 	}
 }
 
@@ -93,7 +94,7 @@ func TestQueueMetricsService_Status_WithJobs(t *testing.T) {
 
 	// Push some items to queues in miniredis.
 	mr.Push(metricsQueueTranscript, "a", "b")
-	mr.Push(metricsQueueTranscript+":dead", "c")
+	mr.Push(metricsQueueTranscriptDLQ, "c")
 
 	// Seed DB records.
 	seedFailedJobAPI(t, db, metricsQueueTranscript, "pending")
@@ -114,6 +115,7 @@ func TestQueueMetricsService_Status_WithJobs(t *testing.T) {
 	require.NotNil(t, transcriptMetric)
 	assert.Equal(t, int64(2), transcriptMetric.PendingJobs)
 	assert.Equal(t, int64(1), transcriptMetric.DeadJobs)
+	assert.Equal(t, metricsQueueTranscriptDLQ, transcriptMetric.DeadLetterQueue)
 
 	// Check failed job stats.
 	assert.Equal(t, int64(1), report.FailedJobs.TotalFailed)

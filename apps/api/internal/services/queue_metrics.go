@@ -20,21 +20,33 @@ const (
 	metricsQueueSubtitle   = "subtitle_queue"
 	metricsQueueUpload     = "upload_queue"
 	metricsQueueAnalytics  = "analytics_queue"
+
+	metricsQueueTranscriptDLQ = "transcript_dlq"
+	metricsQueueClipDLQ       = "clip_dlq"
+	metricsQueueSubtitleDLQ   = "subtitle_dlq"
+	metricsQueueUploadDLQ     = "upload_dlq"
+	metricsQueueAnalyticsDLQ  = "analytics_dlq"
 )
 
-var metricsQueueNames = []string{
-	metricsQueueTranscript,
-	metricsQueueClip,
-	metricsQueueSubtitle,
-	metricsQueueUpload,
-	metricsQueueAnalytics,
+type queueMetricDefinition struct {
+	Name            string
+	DeadLetterQueue string
+}
+
+var metricsQueueDefinitions = []queueMetricDefinition{
+	{Name: metricsQueueTranscript, DeadLetterQueue: metricsQueueTranscriptDLQ},
+	{Name: metricsQueueClip, DeadLetterQueue: metricsQueueClipDLQ},
+	{Name: metricsQueueSubtitle, DeadLetterQueue: metricsQueueSubtitleDLQ},
+	{Name: metricsQueueUpload, DeadLetterQueue: metricsQueueUploadDLQ},
+	{Name: metricsQueueAnalytics, DeadLetterQueue: metricsQueueAnalyticsDLQ},
 }
 
 // QueueSizeMetric holds the pending and dead-letter counts for one queue.
 type QueueSizeMetric struct {
-	Name        string `json:"name"`
-	PendingJobs int64  `json:"pending_jobs"`
-	DeadJobs    int64  `json:"dead_jobs"`
+	Name            string `json:"name"`
+	DeadLetterQueue string `json:"dead_letter_queue"`
+	PendingJobs     int64  `json:"pending_jobs"`
+	DeadJobs        int64  `json:"dead_jobs"`
 }
 
 // FailedJobStats aggregates database-side failed job counters.
@@ -85,26 +97,26 @@ func (s *QueueMetricsService) Status(ctx context.Context) (*QueueStatusReport, e
 
 // collectQueueSizes fetches LLEN for each main queue and its DLQ from Redis.
 func (s *QueueMetricsService) collectQueueSizes(ctx context.Context) ([]QueueSizeMetric, error) {
-	result := make([]QueueSizeMetric, 0, len(metricsQueueNames))
+	result := make([]QueueSizeMetric, 0, len(metricsQueueDefinitions))
 
-	for _, name := range metricsQueueNames {
-		pending, err := s.rdb.LLen(ctx, name).Result()
+	for _, queueDef := range metricsQueueDefinitions {
+		pending, err := s.rdb.LLen(ctx, queueDef.Name).Result()
 		if err != nil {
-			log.Error().Err(err).Str("queue", name).Msg("QueueMetricsService: LLEN failed")
+			log.Error().Err(err).Str("queue", queueDef.Name).Msg("QueueMetricsService: LLEN failed")
 			return nil, err
 		}
 
-		dlqName := name + ":dead"
-		dead, err := s.rdb.LLen(ctx, dlqName).Result()
+		dead, err := s.rdb.LLen(ctx, queueDef.DeadLetterQueue).Result()
 		if err != nil {
-			log.Error().Err(err).Str("dlq", dlqName).Msg("QueueMetricsService: LLEN DLQ failed")
+			log.Error().Err(err).Str("dlq", queueDef.DeadLetterQueue).Msg("QueueMetricsService: LLEN DLQ failed")
 			return nil, err
 		}
 
 		result = append(result, QueueSizeMetric{
-			Name:        name,
-			PendingJobs: pending,
-			DeadJobs:    dead,
+			Name:            queueDef.Name,
+			DeadLetterQueue: queueDef.DeadLetterQueue,
+			PendingJobs:     pending,
+			DeadJobs:        dead,
 		})
 	}
 
