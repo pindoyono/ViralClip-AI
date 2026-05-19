@@ -153,7 +153,7 @@ func (c *YouTubeCollector) Collect(ctx context.Context, queries []string) ([]Col
 	if err != nil {
 		if errors.Is(err, ErrQuotaExceeded) {
 			log.Warn().Msg("YouTubeCollector: quota exhausted before loading video details")
-			return nil, nil
+			return []CollectedVideo{}, nil
 		}
 		return nil, err
 	}

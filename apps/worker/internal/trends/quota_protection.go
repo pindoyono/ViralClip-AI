@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 // ErrQuotaExceeded indicates the collector reached the current quota budget.
@@ -166,6 +168,7 @@ func (s *YouTubeCacheService) Get(path string, params url.Values, target interfa
 		return false
 	}
 	if err := json.Unmarshal(entry.body, target); err != nil {
+		log.Warn().Err(err).Str("cache_key", key).Msg("YouTubeCacheService: failed to unmarshal cached response")
 		return false
 	}
 	return true
