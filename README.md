@@ -88,6 +88,35 @@ User schedules clips → Worker publishes to platforms
 Analytics synced back to dashboard
 ```
 
+### Auto Publishing Flow (OAuth → Refresh → Scheduler → Publishing → Retry)
+
+```
+User connects social account (OAuth tokens stored in social_accounts)
+      │
+      ▼
+TokenRefreshService (apps/worker/internal/workers/token_refresh.go)
+refreshes expiring access_token before publish window
+      │
+      ▼
+SchedulerWorker (apps/worker/internal/workers/workers.go)
+moves due scheduled_posts (scheduled/pending) → publishing
+      │
+      ▼
+PublishingWorker (apps/worker/internal/workers/workers.go)
+uploads clip to platform and writes publishing_logs
+      │
+      ├─ success → status=published, published_at set, platform_post_id/url set
+      │
+      └─ fail   → failPostWithRetry()
+                 retry_count++, publish_at rescheduled with backoff,
+                 status returns to scheduled (or failed when max retries reached)
+```
+
+Worker runtime in `apps/worker/main.go` starts these loops with immediate first run:
+- `TokenRefreshService.RefreshExpiringTokens` (startup + every 15m)
+- `SchedulerWorker.EnqueueDuePosts` (startup + every 30s)
+- `PublishingWorker.ProcessScheduledPosts` (startup + every 1m)
+
 ---
 
 ## Tech Stack

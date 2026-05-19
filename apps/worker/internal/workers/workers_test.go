@@ -221,6 +221,117 @@ func TestPublishingWorker_ProcessScheduledPosts_RetriesWhenNoToken(t *testing.T)
 	assert.NotEmpty(t, post.ErrorMessage)
 }
 
+func TestAutoPublishingFlow_TokenRefreshSchedulerPublishing_Success(t *testing.T) {
+	db := setupWorkerDB(t)
+	tokenSvc := NewTokenRefreshService(db, nil)
+	scheduler := NewSchedulerWorker(db, nil)
+	publisher := NewPublishingWorker(db, nil)
+
+	expired := time.Now().UTC().Add(-5 * time.Minute)
+	require.NoError(t, db.Create(&SocialAccount{
+		ID:             "acc-flow-success",
+		UserID:         "user-1",
+		Platform:       "tiktok",
+		AccessToken:    "expired-token",
+		RefreshToken:   "refresh-flow",
+		TokenExpiresAt: &expired,
+		IsActive:       true,
+	}).Error)
+
+	require.NoError(t, db.Create(&Clip{
+		ID:          "clip-flow-success",
+		VideoID:     "video-flow-success",
+		UserID:      "user-1",
+		Status:      "ready",
+		StorageURL:  "https://storage.example.com/clip-flow-success.mp4",
+		StoragePath: "/storage/clip-flow-success.mp4",
+	}).Error)
+
+	due := time.Now().UTC().Add(-1 * time.Minute)
+	require.NoError(t, db.Create(&ScheduledPost{
+		ID:              "post-flow-success",
+		ClipID:          "clip-flow-success",
+		UserID:          "user-1",
+		SocialAccountID: "acc-flow-success",
+		Platform:        "tiktok",
+		ScheduledAt:     due,
+		PublishAt:       &due,
+		Status:          "scheduled",
+		CreatedAt:       time.Now().UTC(),
+		UpdatedAt:       time.Now().UTC(),
+	}).Error)
+
+	ctx := context.Background()
+	tokenSvc.RefreshExpiringTokens(ctx)
+
+	var account SocialAccount
+	require.NoError(t, db.First(&account, "id = ?", "acc-flow-success").Error)
+	assert.Contains(t, account.AccessToken, "refreshed_")
+
+	scheduler.EnqueueDuePosts(ctx)
+
+	var post ScheduledPost
+	require.NoError(t, db.First(&post, "id = ?", "post-flow-success").Error)
+	assert.Equal(t, "publishing", post.Status)
+
+	publisher.ProcessScheduledPosts(ctx)
+	require.NoError(t, db.First(&post, "id = ?", "post-flow-success").Error)
+	assert.Equal(t, "published", post.Status)
+	assert.NotEmpty(t, post.PlatformPostID)
+	assert.NotNil(t, post.PublishedAt)
+}
+
+func TestAutoPublishingFlow_PublishFailureUsesRetryWindow(t *testing.T) {
+	db := setupWorkerDB(t)
+	scheduler := NewSchedulerWorker(db, nil)
+	publisher := NewPublishingWorker(db, nil)
+
+	require.NoError(t, db.Create(&SocialAccount{
+		ID:             "acc-flow-retry",
+		UserID:         "user-1",
+		Platform:       "instagram",
+		AccessToken:    "",
+		RefreshToken:   "",
+		TokenExpiresAt: nil,
+		IsActive:       true,
+	}).Error)
+
+	due := time.Now().UTC().Add(-1 * time.Minute)
+	require.NoError(t, db.Create(&ScheduledPost{
+		ID:              "post-flow-retry",
+		ClipID:          "clip-flow-retry",
+		UserID:          "user-1",
+		SocialAccountID: "acc-flow-retry",
+		Platform:        "instagram",
+		ScheduledAt:     due,
+		PublishAt:       &due,
+		Status:          "scheduled",
+		CreatedAt:       time.Now().UTC(),
+		UpdatedAt:       time.Now().UTC(),
+	}).Error)
+
+	ctx := context.Background()
+	scheduler.EnqueueDuePosts(ctx)
+
+	var post ScheduledPost
+	require.NoError(t, db.First(&post, "id = ?", "post-flow-retry").Error)
+	assert.Equal(t, "publishing", post.Status)
+
+	publisher.ProcessScheduledPosts(ctx)
+	require.NoError(t, db.First(&post, "id = ?", "post-flow-retry").Error)
+
+	assert.Equal(t, "scheduled", post.Status)
+	assert.Equal(t, 1, post.RetryCount)
+	assert.NotNil(t, post.PublishAt)
+	assert.True(t, post.PublishAt.After(time.Now().UTC()))
+	assert.NotEmpty(t, post.ErrorMessage)
+
+	// Scheduler should respect retry window and not enqueue immediately.
+	scheduler.EnqueueDuePosts(ctx)
+	require.NoError(t, db.First(&post, "id = ?", "post-flow-retry").Error)
+	assert.Equal(t, "scheduled", post.Status)
+}
+
 // --- CleanupWorker ---
 
 func TestNewCleanupWorker(t *testing.T) {

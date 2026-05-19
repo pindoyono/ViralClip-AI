@@ -123,6 +123,8 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		// Run once immediately so due posts are not delayed until first tick.
+		schedulerWorker.EnqueueDuePosts(ctx)
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -139,6 +141,8 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		// Run once immediately so posts already marked "publishing" are picked up.
+		publishingWorker.ProcessScheduledPosts(ctx)
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
 		for {
