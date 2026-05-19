@@ -334,17 +334,19 @@ func (e *LearningEngine) Recommendations(ctx context.Context, userID string) ([]
 // and returns a flat list.
 func (e *LearningEngine) rankedClips(ctx context.Context, userID string, platform string) ([]ClipWithCPS, error) {
 	type row struct {
-		ClipID     string
-		Title      string
-		Platform   string
-		Views      int64
-		Likes      int64
-		Comments   int64
-		Shares     int64
-		Saves      int64
-		WatchTime  float64
-		Duration   float64
-		ViralScore float64
+		ClipID         string
+		Title          string
+		Platform       string
+		Views          int64
+		Likes          int64
+		Comments       int64
+		Shares         int64
+		Saves          int64
+		WatchTime      float64
+		Duration       float64
+		ViralScore     float64
+		CTR            float64
+		SubscriberGain int64
 	}
 
 	q := e.db.WithContext(ctx).
@@ -359,7 +361,9 @@ func (e *LearningEngine) rankedClips(ctx context.Context, userID string, platfor
 			SUM(ca.saves) AS saves,
 			AVG(ca.watch_time) AS watch_time,
 			MAX(c.duration) AS duration,
-			MAX(c.viral_score) AS viral_score`).
+			MAX(c.viral_score) AS viral_score,
+			AVG(ca.ctr) AS ctr,
+			SUM(ca.subscriber_gain) AS subscriber_gain`).
 		Joins("JOIN clips c ON c.id = ca.clip_id").
 		Where("c.user_id = ? AND c.deleted_at IS NULL", userID).
 		Group("ca.clip_id, c.title, ca.platform")
@@ -376,13 +380,15 @@ func (e *LearningEngine) rankedClips(ctx context.Context, userID string, platfor
 	out := make([]ClipWithCPS, 0, len(rows))
 	for _, r := range rows {
 		m := CPSMetrics{
-			Views:     r.Views,
-			WatchTime: r.WatchTime,
-			Duration:  r.Duration,
-			Likes:     r.Likes,
-			Comments:  r.Comments,
-			Shares:    r.Shares,
-			Saves:     r.Saves,
+			Views:          r.Views,
+			WatchTime:      r.WatchTime,
+			Duration:       r.Duration,
+			Likes:          r.Likes,
+			Comments:       r.Comments,
+			Shares:         r.Shares,
+			Saves:          r.Saves,
+			CTR:            r.CTR,
+			SubscriberGain: r.SubscriberGain,
 		}
 		cid, _ := uuid.Parse(r.ClipID)
 		out = append(out, ClipWithCPS{
