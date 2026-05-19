@@ -28,6 +28,7 @@ _QUESTION_RE = re.compile(r"\?")
 _EXCLAMATION_RE = re.compile(r"!")
 _SENTENCE_RE = re.compile(r"[.!?]+")
 _WORD_RE = re.compile(r"\b[a-zA-Z]{2,}\b")
+_SHORT_CLIP_DURATION_THRESHOLD = 30.0
 
 
 class RetentionPredictor:
@@ -147,8 +148,8 @@ class RetentionPredictor:
         avg_retention = self._clamp_ratio(historical_context.get("avg_retention", 0.0))
         short_retention = self._clamp_ratio(historical_context.get("short_retention", avg_retention))
         long_retention = self._clamp_ratio(historical_context.get("long_retention", avg_retention))
-        duration_retention = short_retention if duration < 30.0 else long_retention
-        alternate_retention = long_retention if duration < 30.0 else short_retention
+        duration_retention = short_retention if duration < _SHORT_CLIP_DURATION_THRESHOLD else long_retention
+        alternate_retention = long_retention if duration < _SHORT_CLIP_DURATION_THRESHOLD else short_retention
 
         baseline_score = avg_retention * 8.0
         duration_fit_score = duration_retention * 8.0
