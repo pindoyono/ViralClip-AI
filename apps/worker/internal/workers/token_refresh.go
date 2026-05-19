@@ -77,13 +77,12 @@ func (s *TokenRefreshService) RefreshExpiringTokens(ctx context.Context) {
 
 	log.Info().Int("count", len(accounts)).Msg("TokenRefreshService: refreshing expiring tokens")
 
-	for _, account := range accounts {
+	for i := range accounts {
 		select {
 		case <-ctx.Done():
 			return
 		default:
-			accountCopy := account
-			if err := s.RefreshAccountToken(ctx, &accountCopy); err != nil {
+			if err := s.RefreshAccountToken(ctx, &accounts[i]); err != nil {
 				// Error is already logged and accounted for by RefreshAccountToken.
 				continue
 			}

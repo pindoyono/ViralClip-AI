@@ -373,9 +373,6 @@ func (w *PublishingWorker) ensureValidAccessToken(ctx context.Context, account *
 	if account.RefreshToken == "" {
 		return fmt.Errorf("access token expired and refresh_token is missing")
 	}
-	if w.tokenRefresh == nil {
-		w.tokenRefresh = NewTokenRefreshService(w.db, w.redis)
-	}
 	if err := w.tokenRefresh.RefreshAccountToken(ctx, account); err != nil {
 		return fmt.Errorf("access token refresh failed: %w", err)
 	}
