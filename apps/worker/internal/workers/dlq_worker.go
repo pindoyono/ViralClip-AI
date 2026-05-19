@@ -55,7 +55,11 @@ func (w *DeadLetterWorker) Start(ctx context.Context) {
 // consumeDLQ pops jobs from the explicit DLQ bound to origQueue and persists
 // them.
 func (w *DeadLetterWorker) consumeDLQ(ctx context.Context, origQueue string) {
-	dlqName := queue.DeadLetterQueueName(origQueue)
+	dlqName, err := queue.DeadLetterQueueName(origQueue)
+	if err != nil {
+		log.Error().Err(err).Str("queue", origQueue).Msg("DeadLetterWorker: unknown dead-letter queue mapping")
+		return
+	}
 	log.Info().Str("dlq", dlqName).Msg("DeadLetterWorker: monitoring DLQ")
 
 	for {

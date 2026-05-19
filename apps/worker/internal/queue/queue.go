@@ -82,7 +82,10 @@ func (q *QueueClient) PushDead(ctx context.Context, queueName string, job *Job) 
 		return fmt.Errorf("queue dead-letter: marshal job: %w", err)
 	}
 
-	dlq := deadLetterKey(queueName)
+	dlq, err := DeadLetterQueueName(queueName)
+	if err != nil {
+		return fmt.Errorf("queue dead-letter name %q: %w", queueName, err)
+	}
 	if err := q.rdb.RPush(ctx, dlq, data).Err(); err != nil {
 		return fmt.Errorf("queue dead-letter push %q: %w", dlq, err)
 	}
@@ -131,7 +134,11 @@ func (q *QueueClient) QueueLength(ctx context.Context, queueName string) (int64,
 // DeadQueueLength returns the number of jobs in the dead-letter queue for
 // queueName.
 func (q *QueueClient) DeadQueueLength(ctx context.Context, queueName string) (int64, error) {
-	return q.QueueLength(ctx, deadLetterKey(queueName))
+	dlq, err := DeadLetterQueueName(queueName)
+	if err != nil {
+		return 0, fmt.Errorf("queue dead-letter name %q: %w", queueName, err)
+	}
+	return q.QueueLength(ctx, dlq)
 }
 
 // Metrics returns a snapshot of queue lengths for all known queues.
@@ -153,11 +160,16 @@ func (q *QueueClient) Metrics(ctx context.Context) (map[string]int64, error) {
 		}
 		metrics[name] = n
 
-		d, err := q.DeadQueueLength(ctx, name)
+		dlqName, err := DeadLetterQueueName(name)
 		if err != nil {
 			return nil, err
 		}
-		metrics[deadLetterKey(name)] = d
+
+		d, err := q.QueueLength(ctx, dlqName)
+		if err != nil {
+			return nil, err
+		}
+		metrics[dlqName] = d
 	}
 
 	return metrics, nil

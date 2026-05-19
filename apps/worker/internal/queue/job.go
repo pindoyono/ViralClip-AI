@@ -13,7 +13,7 @@
 package queue
 
 import (
-	"strings"
+	"fmt"
 	"time"
 )
 
@@ -103,22 +103,12 @@ type Job struct {
 
 // DeadLetterQueueName returns the explicit dead-letter queue name for a given
 // main queue.
-func DeadLetterQueueName(queueName string) string {
+func DeadLetterQueueName(queueName string) (string, error) {
 	if dlqName, ok := deadLetterQueueNames[queueName]; ok {
-		return dlqName
+		return dlqName, nil
 	}
 
-	baseName := strings.TrimSuffix(queueName, "_queue")
-	if baseName == "" {
-		baseName = queueName
-	}
-
-	return baseName + "_dlq"
-}
-
-// deadLetterKey returns the dead-letter queue name for a given queue.
-func deadLetterKey(queueName string) string {
-	return DeadLetterQueueName(queueName)
+	return "", fmt.Errorf("unknown queue %q", queueName)
 }
 
 // statusKey returns the Redis key used to track a job's status.
