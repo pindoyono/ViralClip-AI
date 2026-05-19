@@ -293,17 +293,20 @@ func (h *ClipHandlerV2) buildHistoricalRetentionContext(ctx context.Context, use
 		return nil, nil
 	}
 
+	shortRetention := r.AvgRetention.Float64
+	if r.ShortRetention.Valid {
+		shortRetention = r.ShortRetention.Float64
+	}
+	longRetention := r.AvgRetention.Float64
+	if r.LongRetention.Valid {
+		longRetention = r.LongRetention.Float64
+	}
+
 	out := &aiHistoricalRetentionContext{
 		SampleSize:     r.SampleSize,
 		AvgRetention:   r.AvgRetention.Float64,
-		ShortRetention: r.AvgRetention.Float64,
-		LongRetention:  r.AvgRetention.Float64,
-	}
-	if r.ShortRetention.Valid {
-		out.ShortRetention = r.ShortRetention.Float64
-	}
-	if r.LongRetention.Valid {
-		out.LongRetention = r.LongRetention.Float64
+		ShortRetention: shortRetention,
+		LongRetention:  longRetention,
 	}
 	return out, nil
 }

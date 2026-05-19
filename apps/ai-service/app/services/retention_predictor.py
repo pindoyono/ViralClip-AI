@@ -148,8 +148,9 @@ class RetentionPredictor:
         avg_retention = self._clamp_ratio(historical_context.get("avg_retention", 0.0))
         short_retention = self._clamp_ratio(historical_context.get("short_retention", avg_retention))
         long_retention = self._clamp_ratio(historical_context.get("long_retention", avg_retention))
-        duration_retention = short_retention if duration < _SHORT_CLIP_DURATION_THRESHOLD else long_retention
-        alternate_retention = long_retention if duration < _SHORT_CLIP_DURATION_THRESHOLD else short_retention
+        is_short = duration < _SHORT_CLIP_DURATION_THRESHOLD
+        duration_retention = short_retention if is_short else long_retention
+        alternate_retention = long_retention if is_short else short_retention
 
         baseline_score = avg_retention * 8.0
         duration_fit_score = duration_retention * 8.0
