@@ -29,7 +29,7 @@ Output is a list of ClipV2Result with HH:MM:SS start/end strings.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, List, Mapping, Optional
 
 from loguru import logger
 
@@ -120,6 +120,7 @@ class ClipEngineV2:
         profile_type: str = "general",
         min_clip_score: int = 50,
         max_clips: int = 10,
+        historical_context: Optional[Mapping[str, Any]] = None,
     ) -> List[ClipV2Result]:
         """Generate scored clip candidates from transcript segments.
 
@@ -197,6 +198,7 @@ class ClipEngineV2:
                 story_scores=story_scores,
                 hook_score_map=hook_score_map,
                 profile_type=profile_type,
+                historical_context=historical_context,
             )
             if result is not None:
                 candidates.append(result)
@@ -233,6 +235,7 @@ class ClipEngineV2:
         story_scores: list[int],
         hook_score_map: dict[int, float],
         profile_type: str,
+        historical_context: Optional[Mapping[str, Any]],
     ) -> Optional[ClipV2Result]:
         """Try to build a valid clip window starting at anchor_idx.
 
@@ -280,6 +283,7 @@ class ClipEngineV2:
             min_duration=min_d,
             max_duration=max_d,
             has_hook=has_hook,
+            historical_context=historical_context,
         )
 
         composite = self._score.calculate(

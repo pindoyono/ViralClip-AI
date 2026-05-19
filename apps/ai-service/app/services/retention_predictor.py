@@ -19,7 +19,7 @@ Five signals are combined:
 from __future__ import annotations
 
 import re
-from typing import List, Optional
+from typing import Mapping, Optional
 
 from loguru import logger
 
@@ -49,6 +49,7 @@ class RetentionPredictor:
         min_duration: float,
         max_duration: float,
         has_hook: bool = False,
+        historical_context: Optional[Mapping[str, float | int]] = None,
     ) -> int:
         """Return a retention score in [0, 100] for a clip window.
 
@@ -78,12 +79,13 @@ class RetentionPredictor:
         qa_s       = self._question_exclamation_score(text)
         hook_s     = 15.0 if has_hook else 0.0
         variety_s  = self._sentence_variety_score(text)
+        historical_s = self._historical_feedback_score(duration, historical_context)
 
-        raw = duration_s + density_s + qa_s + hook_s + variety_s
+        raw = duration_s + density_s + qa_s + hook_s + variety_s + historical_s
         s = max(0, min(100, round(raw)))
         logger.debug(
-            "RetentionPredictor: dur={:.1f}s dur_s={:.1f} dens={:.1f} qa={:.1f} hook={} var={:.1f} → {}",
-            duration, duration_s, density_s, qa_s, has_hook, variety_s, s,
+            "RetentionPredictor: dur={:.1f}s dur_s={:.1f} dens={:.1f} qa={:.1f} hook={} var={:.1f} hist={:.1f} → {}",
+            duration, duration_s, density_s, qa_s, has_hook, variety_s, historical_s, s,
         )
         return s
 
@@ -127,3 +129,40 @@ class RetentionPredictor:
         max_len = max(lengths)
         variety = (max_len - min_len) / max(max_len, 1)
         return min(10.0, variety * 10.0)
+
+    def _historical_feedback_score(
+        self,
+        duration: float,
+        historical_context: Optional[Mapping[str, float | int]],
+    ) -> float:
+        """Historical ClipAnalytics contribution with duration preference bias."""
+        if not historical_context:
+            return 0.0
+
+        sample_size = int(historical_context.get("sample_size", 0) or 0)
+        if sample_size <= 0:
+            return 0.0
+
+        confidence = min(1.0, sample_size / 30.0)
+        avg_retention = self._clamp_ratio(historical_context.get("avg_retention", 0.0))
+        short_retention = self._clamp_ratio(historical_context.get("short_retention", avg_retention))
+        long_retention = self._clamp_ratio(historical_context.get("long_retention", avg_retention))
+        duration_retention = short_retention if duration < 30.0 else long_retention
+        alternate_retention = long_retention if duration < 30.0 else short_retention
+
+        baseline_score = avg_retention * 8.0
+        duration_fit_score = duration_retention * 8.0
+        preference_score = (duration_retention - alternate_retention) * 25.0
+        weighted = (baseline_score + duration_fit_score + preference_score) * confidence
+        return max(-20.0, min(25.0, weighted))
+
+    @staticmethod
+    def _clamp_ratio(value: float | int | None) -> float:
+        if value is None:
+            return 0.0
+        v = float(value)
+        if v < 0:
+            return 0.0
+        if v > 1:
+            return 1.0
+        return v

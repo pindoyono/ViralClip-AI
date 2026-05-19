@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,6 +29,13 @@ type ClipHandlerV2 struct {
 	hookRepo repositories.HookRepository
 	aiURL    string
 	client   *http.Client
+}
+
+type aiHistoricalRetentionContext struct {
+	SampleSize     int64   `json:"sample_size"`
+	AvgRetention   float64 `json:"avg_retention"`
+	ShortRetention float64 `json:"short_retention"`
+	LongRetention  float64 `json:"long_retention"`
 }
 
 // NewClipHandlerV2 creates a new ClipHandlerV2 with dependency injection.
@@ -108,12 +116,13 @@ func (h *ClipHandlerV2) Generate(c *fiber.Ctx) error {
 		MatchedPattern string  `json:"matched_pattern"`
 	}
 	type aiRequest struct {
-		VideoID        string            `json:"video_id"`
-		Segments       []aiSegment       `json:"segments"`
-		HookDetections []aiHookDetection `json:"hook_detections"`
-		ProfileType    string            `json:"profile_type"`
-		MinClipScore   int               `json:"min_clip_score"`
-		MaxClips       int               `json:"max_clips"`
+		VideoID           string                        `json:"video_id"`
+		Segments          []aiSegment                   `json:"segments"`
+		HookDetections    []aiHookDetection             `json:"hook_detections"`
+		ProfileType       string                        `json:"profile_type"`
+		MinClipScore      int                           `json:"min_clip_score"`
+		MaxClips          int                           `json:"max_clips"`
+		HistoricalContext *aiHistoricalRetentionContext `json:"historical_context,omitempty"`
 	}
 
 	aiSegs := make([]aiSegment, len(req.Segments))
@@ -132,13 +141,19 @@ func (h *ClipHandlerV2) Generate(c *fiber.Ctx) error {
 		}
 	}
 
+	historicalCtx, histErr := h.buildHistoricalRetentionContext(c.Context(), userID)
+	if histErr != nil {
+		log.Warn().Err(histErr).Str("user_id", userID).Msg("Failed to build historical retention context; continuing without it")
+	}
+
 	payload, err := json.Marshal(aiRequest{
-		VideoID:        videoID.String(),
-		Segments:       aiSegs,
-		HookDetections: aiHooks,
-		ProfileType:    req.ProfileType,
-		MinClipScore:   req.MinClipScore,
-		MaxClips:       req.MaxClips,
+		VideoID:           videoID.String(),
+		Segments:          aiSegs,
+		HookDetections:    aiHooks,
+		ProfileType:       req.ProfileType,
+		MinClipScore:      req.MinClipScore,
+		MaxClips:          req.MaxClips,
+		HistoricalContext: historicalCtx,
 	})
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to marshal ClipV2 AI request")
@@ -239,4 +254,56 @@ func (h *ClipHandlerV2) Generate(c *fiber.Ctx) error {
 		Clips:       clips,
 		Total:       len(clips),
 	})
+}
+
+func (h *ClipHandlerV2) buildHistoricalRetentionContext(ctx context.Context, userID string) (*aiHistoricalRetentionContext, error) {
+	type row struct {
+		SampleSize     int64
+		AvgRetention   sql.NullFloat64
+		ShortRetention sql.NullFloat64
+		LongRetention  sql.NullFloat64
+	}
+
+	var r row
+	if err := h.db.WithContext(ctx).
+		Table("clip_analytics ca").
+		Select(`COUNT(*) AS sample_size,
+			AVG(CASE
+				WHEN c.duration > 0 THEN
+					CASE WHEN (ca.watch_time / c.duration) > 1 THEN 1.0 ELSE (ca.watch_time / c.duration) END
+				ELSE NULL
+			END) AS avg_retention,
+			AVG(CASE
+				WHEN c.duration > 0 AND c.duration < 30 THEN
+					CASE WHEN (ca.watch_time / c.duration) > 1 THEN 1.0 ELSE (ca.watch_time / c.duration) END
+				ELSE NULL
+			END) AS short_retention,
+			AVG(CASE
+				WHEN c.duration > 0 AND c.duration >= 30 THEN
+					CASE WHEN (ca.watch_time / c.duration) > 1 THEN 1.0 ELSE (ca.watch_time / c.duration) END
+				ELSE NULL
+			END) AS long_retention`).
+		Joins("JOIN clips c ON c.id = ca.clip_id").
+		Where("c.user_id = ? AND c.deleted_at IS NULL", userID).
+		Scan(&r).Error; err != nil {
+		return nil, err
+	}
+
+	if r.SampleSize == 0 || !r.AvgRetention.Valid {
+		return nil, nil
+	}
+
+	out := &aiHistoricalRetentionContext{
+		SampleSize:     r.SampleSize,
+		AvgRetention:   r.AvgRetention.Float64,
+		ShortRetention: r.AvgRetention.Float64,
+		LongRetention:  r.AvgRetention.Float64,
+	}
+	if r.ShortRetention.Valid {
+		out.ShortRetention = r.ShortRetention.Float64
+	}
+	if r.LongRetention.Valid {
+		out.LongRetention = r.LongRetention.Float64
+	}
+	return out, nil
 }
